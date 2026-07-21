@@ -1,0 +1,50 @@
+{
+  "exp_id": "m0_fp16_baseline",
+  "env": {
+    "timestamp": "2026-07-21T05:19:38.014934+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "exp_id": "m0_fp16_baseline",
+    "seed": 42,
+    "out_dir": "results",
+    "model": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "eval": {
+      "seqlen": 2048,
+      "stride": 2048,
+      "max_samples": null
+    },
+    "profile": {
+      "prefill_len": 512,
+      "decode_tokens": 128
+    }
+  },
+  "size": {
+    "params": 494032768,
+    "params_millions": 494.033,
+    "bytes": 988065536,
+    "size_mb": 942.293
+  },
+  "ppl": {
+    "ppl": 14.2445,
+    "seqlen": 2048,
+    "stride": 2048,
+    "n_tokens": 299078
+  },
+  "latency": {
+    "prefill_len": 512,
+    "decode_tokens": 128,
+    "prefill_ms_median": 30.42,
+    "decode_tps_median": 37.19
+  },
+  "memory": {
+    "peak_mb": 4574.341,
+    "current_mb": 959.292
+  }
+}
