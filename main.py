@@ -78,8 +78,24 @@ def cmd_eval(args):
     log.info("结果已保存: %s", path)
 
 
+def _run_calibration(model, tok, qcfg, cfg):
+    """为 GPTQ/AWQ 收集逐层校准统计;RTN 直接返回 None。"""
+    if qcfg.method == "rtn":
+        return None
+    from lowbitsparse.quant import (
+        get_calib_inputs, collect_calib_stats, target_linear_names)
+    log.info("收集校准统计 (method=%s, n=%d, seqlen=%d)...",
+             qcfg.method, qcfg.calib_n_samples, qcfg.calib_seqlen)
+    calib_ids = get_calib_inputs(tok, n_samples=qcfg.calib_n_samples,
+                                 seqlen=qcfg.calib_seqlen)
+    names = target_linear_names(model, qcfg)
+    stats = collect_calib_stats(model, calib_ids, names)
+    log.info("校准完成,共 %d 层有统计", len(stats))
+    return stats
+
+
 def cmd_quant(args):
-    """M1 子命令:RTN 伪量化 → 评测 → 报告压缩比,与 FP16 基线对比。"""
+    """M1 子命令:量化(RTN/GPTQ/AWQ)→ 评测 → 报告压缩比。"""
     from lowbitsparse.models import model_size_report
     from lowbitsparse.quant import (
         QuantConfig, apply_quantization, compression_report)
@@ -88,21 +104,22 @@ def cmd_quant(args):
     set_seed(cfg.get("seed", 42))
     model, tok = _load(cfg)
 
-    fp16 = model_size_report(model)          # 量化前体积(分母)
+    fp16 = model_size_report(model)
     qcfg = QuantConfig.from_dict(cfg.get("quant", {}))
-    model, n = apply_quantization(model, qcfg)   # 就地替换 Linear
-    log.info("已量化 %d 个 Linear (bits=%d, group=%d, sym=%s)",
-             n, qcfg.n_bits, qcfg.group_size, qcfg.symmetric)
+    calib_stats = _run_calibration(model, tok, qcfg, cfg)
+    model, n = apply_quantization(model, qcfg, calib_stats=calib_stats)
+    log.info("已量化 %d 个 Linear (method=%s, bits=%d, group=%d, sym=%s)",
+             n, qcfg.method, qcfg.n_bits, qcfg.group_size, qcfg.symmetric)
 
-    comp = compression_report(model)         # 量化后理论体积 + 等效 bit
-    comp["ratio"] = round(fp16["size_mb"] / comp["size_mb"], 3)  # 压缩比
+    comp = compression_report(model)
+    comp["ratio"] = round(fp16["size_mb"] / comp["size_mb"], 3)
     log.info("量化后 %.1fMB, 等效 %.2f bit, 压缩比 %.2fx",
              comp["size_mb"], comp["effective_bits"], comp["ratio"])
 
-    metrics = _evaluate(model, tok, cfg)     # 复用评测闭环
+    metrics = _evaluate(model, tok, cfg)
     results = {"config": cfg, "size_fp16": fp16, "compression": comp, **metrics}
     path = save_results(results, cfg.get("out_dir", "results"),
-                        cfg.get("exp_id", "m1_rtn"))
+                        cfg.get("exp_id", f"m1_{qcfg.method}"))
     log.info("结果已保存: %s", path)
 
 

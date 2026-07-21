@@ -1,0 +1,27 @@
+# M1 配置:Qwen2.5-0.5B AWQ INT4(激活感知逐通道缩放搜索)
+exp_id: m1_awq_int4_g128
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+quant:
+  method: awq
+  n_bits: 4
+  group_size: 128       # 64/128/256 可扫描;-1 为 per-channel
+  symmetric: false
+  skip: ["lm_head"]
+  calib_n_samples: 128  # 校准样本条数
+  calib_seqlen: 512     # 每条序列长度
+
+eval:
+  seqlen: 2048
+  stride: 2048
+  max_samples: null     # 冒烟设 4
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128

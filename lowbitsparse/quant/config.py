@@ -21,8 +21,11 @@ class QuantConfig:
     n_bits: int = 4
     group_size: int = 128
     symmetric: bool = False
-    method: str = "rtn"
+    method: str = "rtn"        # "rtn" | "gptq" | "awq"
     skip: tuple = ("lm_head",)
+    # 校准参数(GPTQ / AWQ 用;RTN 忽略)
+    calib_n_samples: int = 128  # 校准样本数(条)
+    calib_seqlen: int = 512     # 每条序列长度(token)
 
     @classmethod
     def from_dict(cls, d: dict) -> "QuantConfig":

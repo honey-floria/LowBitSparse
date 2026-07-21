@@ -10,13 +10,16 @@ import torch.nn as nn
 
 from .config import QuantConfig
 from .fake_linear import FakeQuantLinear
+from .gptq import gptq_quantize_weight
+from .awq import awq_quantize_weight
 
 
 def _iter_linear_names(model, skip):
-    """收集待量化的 (父模块, 子名, Linear) 三元组。
+    """收集待量化的 (全名, 父模块, 子名, Linear) 四元组。
 
     先收集再替换,避免在遍历 named_modules 的同时修改结构。
     skip 中任一关键字出现在模块全名里,则跳过该层(如 lm_head)。
+    全名用于对齐 calibration 收集的逐层统计。
     """
     targets = []
     for name, module in model.named_modules():
@@ -26,25 +29,47 @@ def _iter_linear_names(model, skip):
             parent_name = name.rsplit(".", 1)[0] if "." in name else ""
             parent = model.get_submodule(parent_name) if parent_name else model
             child = name.rsplit(".", 1)[-1]
-            targets.append((parent, child, module))
+            targets.append((name, parent, child, module))
     return targets
 
 
-def apply_quantization(model, cfg: QuantConfig):
+def _compute_w_dq(name, linear, cfg, calib_stats):
+    """按 cfg.method 计算该层的反量化权重;RTN 返回 None(由层内自算)。"""
+    method = getattr(cfg, "method", "rtn")
+    if method == "rtn":
+        return None                              # 走 FakeQuantLinear 内部 RTN
+    stats = (calib_stats or {}).get(name)
+    if stats is None:
+        raise ValueError(f"{method} 需要校准统计,但缺少层 {name} 的 stats")
+    if method == "gptq":
+        return gptq_quantize_weight(linear.weight.data, stats["H"], cfg)
+    if method == "awq":
+        return awq_quantize_weight(linear.weight.data, stats["act_scales"], cfg)
+    raise ValueError(f"未知量化方法: {method}")
+
+
+def apply_quantization(model, cfg: QuantConfig, calib_stats: dict = None):
     """就地把模型中的 Linear 替换为 FakeQuantLinear。
 
     参数:
-        model: HF 因果 LM。
-        cfg:   QuantConfig。
+        model:       HF 因果 LM。
+        cfg:         QuantConfig。
+        calib_stats: GPTQ/AWQ 的逐层统计({全名 → {H, act_scales}});RTN 传 None。
     返回:
         (model, n_replaced):替换后的模型与被替换层数。
     """
     targets = _iter_linear_names(model, cfg.skip)
-    for parent, child, linear in targets:
+    for name, parent, child, linear in targets:
+        w_dq = _compute_w_dq(name, linear, cfg, calib_stats)
         # 在原模块所在设备上构造量化层,避免 device 不一致
-        fq = FakeQuantLinear(linear, cfg).to(linear.weight.device)
+        fq = FakeQuantLinear(linear, cfg, w_dq=w_dq).to(linear.weight.device)
         setattr(parent, child, fq)          # 原地替换子模块
     return model, len(targets)
+
+
+def target_linear_names(model, cfg: QuantConfig) -> list:
+    """返回将被量化的所有 Linear 全名(供 calibration 定位收集哪些层)。"""
+    return [name for name, _, _, _ in _iter_linear_names(model, cfg.skip)]
 
 
 def compression_report(model) -> dict:

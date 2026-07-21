@@ -41,20 +41,39 @@
 ### 2.1 整体架构
 ```
 LowBitSparse/
-├── main.py                  # CLI 入口:量化 / 评测 / 稀疏 / 蒸馏 子命令
-├── configs/                 # YAML 实验配置(模型、bit、group_size、稀疏模式…)
-│   ├── qwen0.5b_int4.yaml
-│   └── qwen1.5b_int4.yaml
+├── main.py                      # CLI 入口:eval/quant 已实现、sparse/distill 占位;量化+评测闭环
+├── configs/                     # YAML 实验配置
+│   ├── qwen0.5b_base.yaml       #   0.5B FP16 基线(M0)
+│   ├── qwen1.5b_base.yaml       #   1.5B FP16 基线
+│   ├── qwen0.5b_int8.yaml       #   RTN INT8(量化健全性检查)
+│   ├── qwen0.5b_int4.yaml       #   RTN INT4
+│   ├── qwen0.5b_gptq_int4.yaml  #   GPTQ INT4(含校准参数)
+│   └── qwen0.5b_awq_int4.yaml   #   AWQ INT4(含校准参数)
 ├── lowbitsparse/
-│   ├── models/              # 模型加载、包装、hook 注入
-│   ├── quant/               # RTN / GPTQ / AWQ 量化器,伪量化 Linear
-│   ├── sparse/              # 滑窗 / StreamingLLM / 块稀疏 注意力
-│   ├── distill/             # QAT 蒸馏训练循环(KL + 特征对齐)
-│   ├── eval/                # PPL、lm-eval、延迟/显存 profiler
-│   └── utils/               # 校准数据、日志、checkpoint、Drive 挂载
-├── scripts/                 # 一键脚本 & Colab notebook
-├── results/                 # 指标 json / 曲线图 / 报告
-└── doc/                     # TODO.md, OPTIMIZATION.md
+│   ├── models/loader.py         # 模型/分词器加载(dtype/设备管理)、体积统计
+│   ├── quant/                   # 权重量化(M1 核心)
+│   │   ├── config.py            #   QuantConfig 超参 dataclass(可从 YAML 构造)
+│   │   ├── primitives.py        #   共享定点数学:求 scale/zero、量化-反量化、分组伪量化
+│   │   ├── rtn.py               #   RTN 量化(baseline,只看权重,无需校准)
+│   │   ├── gptq.py              #   GPTQ 量化(Hessian 阻尼求逆 + 逐列误差补偿)
+│   │   ├── awq.py               #   AWQ 量化(激活感知逐通道缩放网格搜索)
+│   │   ├── calibration.py       #   校准数据采样 + hook 收集逐层 Hessian/激活统计
+│   │   ├── fake_linear.py       #   FakeQuantLinear:持有反量化权重,forward 走标准 matmul
+│   │   └── apply.py             #   遍历替换 Linear、按 method 路由、压缩比/等效 bit 统计
+│   ├── sparse/                  # 滑窗 / StreamingLLM / 块稀疏 注意力(M2,未落地)
+│   ├── distill/                 # QAT 蒸馏训练循环(M3,未落地)
+│   ├── eval/                    # 评测
+│   │   ├── ppl.py               #   WikiText-2 strided PPL
+│   │   └── profiler.py          #   prefill/decode 延迟、显存峰值
+│   └── utils/common.py          # 随机种子、日志、YAML 加载、结果落盘、环境采集
+├── scripts/                     # 一键脚本 & Colab notebook
+│   ├── cpu_smoke.py             #   CPU 秒级冒烟:步骤1-7 演示量化数学+校准流水线(无下载)
+│   ├── run_sweep.py             #   method×bit×group_size 全组合扫描,落盘 json
+│   ├── summarize.py             #   汇总 results/*.json 为验收表格(含 ΔPPL)
+│   └── colab_m0_baseline.ipynb  #   Colab:挂 Drive、装依赖、跑基线
+├── tests/                       # pytest:test_rtn / test_gptq / test_awq / test_group_size
+├── results/                     # 指标 json / 曲线图 / 报告
+└── doc/                         # TODO.md、OPTIMIZATION.md、CPU_SMOKE_MAP.md
 ```
 
 ### 2.2 依赖与环境(Colab A100)
@@ -100,10 +119,12 @@ LowBitSparse/
 - [x] RTN 量化器 + INT8 / INT4 / INT3 支持(非整除 group 用 padding)
 - [x] 模型替换 + 理论压缩比/等效 bit 统计(apply.py)
 - [x] 单元测试(round-trip 误差、位宽单调性、padding、对称路径)
-- [ ] GPTQ 量化器(Hessian 校准 + 误差补偿)
-- [ ] AWQ 量化器(激活感知缩放搜索)
-- [ ] group_size 扫描(64/128/256)、per-channel vs per-group
-- [~] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线(RTN INT8/INT4 已实测;待补 GPTQ/AWQ 与 group_size 扫描)
+- [x] GPTQ 量化器(Hessian 校准 + 逐列误差补偿,gptq.py + calibration.py)
+- [x] AWQ 量化器(激活感知逐通道缩放网格搜索,awq.py)
+- [x] group_size 扫描(64/128/256/per-channel)+ per-channel vs per-group(run_sweep.py 网格 + 单调性测试)
+- [~] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线
+      (代码闭环已就绪:`scripts/run_sweep.py` 跑全组合、`scripts/summarize.py` 一键出表;
+       CPU 侧逻辑已冒烟验证;**待在 Colab/A100 实跑填充 GPTQ/AWQ 与 group 扫描的实测 PPL**)
 
 ### M2 — 稀疏注意力
 - [ ] 注意力 hook / 替换机制(不改原权重)
