@@ -17,6 +17,8 @@ def eval_wikitext2_ppl(
     split: str = "test",         # 数据划分:test/validation
     device: str = None,          # 计算设备,None 时取模型所在设备
     max_samples: int = None,     # 限制评测 token 量做冒烟测试,None 为全量
+    dataset_id: str = "Salesforce/wikitext",  # 带命名空间的官方镜像,避免无命名空间旧 id 报错
+    dataset_config: str = "wikitext-2-raw-v1",  # 数据集配置(raw 版,PPL 口径与论文一致)
 ) -> dict:
     """计算 WikiText-2-raw 的困惑度。
 
@@ -32,7 +34,9 @@ def eval_wikitext2_ppl(
         device = next(model.parameters()).device
 
     # 加载 wikitext-2 raw 版(未做 token 归一化,PPL 口径与论文一致)
-    data = load_dataset("wikitext", "wikitext-2-raw-v1", split=split)
+    # 用 Salesforce/wikitext 而非裸 "wikitext":新版 huggingface_hub 要求
+    # 仓库 id 必须为 namespace/name 格式,裸 id 会报 Invalid HF URI。
+    data = load_dataset(dataset_id, dataset_config, split=split)
     # 用双换行拼接所有行,还原成一整篇连续文本
     text = "\n\n".join(data["text"])
     # 一次性编码为 token id,形状 [1, 总token数]
