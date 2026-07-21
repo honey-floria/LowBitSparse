@@ -1,0 +1,25 @@
+# M1 配置:Qwen2.5-0.5B RTN INT8(精度损失应极小,作为量化健全性检查)
+exp_id: m1_rtn_int8_g128
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+quant:
+  method: rtn
+  n_bits: 8
+  group_size: 128
+  symmetric: false
+  skip: ["lm_head"]
+
+eval:
+  seqlen: 2048
+  stride: 2048
+  max_samples: null
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128

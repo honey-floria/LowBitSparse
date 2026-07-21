@@ -1,0 +1,25 @@
+# M1 配置:Qwen2.5-0.5B RTN INT4
+exp_id: m1_rtn_int4_g128
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+quant:
+  method: rtn
+  n_bits: 4
+  group_size: 128       # 64/128/256 可扫描;-1 为 per-channel
+  symmetric: false      # 非对称 RTN 精度通常更好
+  skip: ["lm_head"]     # 输出层保持 FP16
+
+eval:
+  seqlen: 2048
+  stride: 2048
+  max_samples: null     # 冒烟设 4
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128

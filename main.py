@@ -17,72 +17,92 @@ from lowbitsparse.utils import get_logger, load_config, set_seed, save_results
 log = get_logger()   # 全局 logger,各子命令共用同一实例
 
 
-def cmd_eval(args):
-    """M0 子命令:加载 FP16 模型,评测 PPL + 延迟 + 显存,并落盘为基线。
-
-    参数:
-        args: argparse 解析结果,需含 args.config(YAML 配置路径)。
-
-    流程:读配置 → 固定种子 → 加载模型 → 统计体积 → PPL → 延迟 → 显存 → 存 json。
-    """
-    import torch   # 延迟导入:仅本子命令真正需要 GPU/张量
-
-    # 同样延迟导入模型与评测模块(内部依赖 torch/transformers/datasets)
-    from lowbitsparse.models import load_model_and_tokenizer, model_size_report
-    from lowbitsparse.eval import (
-        eval_wikitext2_ppl,   # WikiText-2 困惑度
-        profile_latency,      # prefill/decode 延迟
-        profile_memory,       # 显存峰值
-    )
-
-    # 读取 YAML 配置;无 --config 时用空 dict,后续 .get() 全部走默认值
-    cfg = load_config(args.config) if args.config else {}
-    set_seed(cfg.get("seed", 42))     # 固定随机源,保证可复现
-    m = cfg.get("model", {})          # 模型相关子配置
-
-    # 加载模型与分词器(配置缺省时回退到 0.5B / float16 / cuda)
+def _load(cfg):
+    """按配置加载模型与分词器(eval/quant 共用)。"""
+    from lowbitsparse.models import load_model_and_tokenizer
+    m = cfg.get("model", {})
     model, tok = load_model_and_tokenizer(
         model_name=m.get("name", "Qwen/Qwen2.5-0.5B-Instruct"),
         dtype=m.get("dtype", "float16"),
         device=m.get("device", "cuda"),
     )
     log.info("模型已加载: %s", m.get("name"))
+    return model, tok
 
-    # 清零显存峰值统计,使随后 profile_memory 得到的是"本次评测"的峰值
+
+def _evaluate(model, tok, cfg):
+    """跑 PPL + 延迟 + 显存,返回指标 dict(eval/quant 共用的评测闭环)。"""
+    import torch
+    from lowbitsparse.eval import (
+        eval_wikitext2_ppl, profile_latency, profile_memory)
+
+    # 清零峰值统计,确保 profile_memory 反映"本次评测"的峰值
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
-    # 1) 体积:参数量与理论字节数,后续量化以此算压缩比
-    size = model_size_report(model)
-    log.info("参数量 %.3fM, 体积 %.1fMB", size["params_millions"], size["size_mb"])
-
-    # 2) 精度:WikiText-2 困惑度
-    ev = cfg.get("eval", {})          # 评测子配置
+    ev = cfg.get("eval", {})
     ppl = eval_wikitext2_ppl(
         model, tok,
         seqlen=ev.get("seqlen", 2048),
         stride=ev.get("stride", 2048),
-        max_samples=ev.get("max_samples"),   # None=全量,整数=冒烟
+        max_samples=ev.get("max_samples"),
     )
     log.info("WikiText-2 PPL = %s", ppl["ppl"])
 
-    # 3) 效率:prefill 延迟 + decode 吞吐
-    pf = cfg.get("profile", {})       # 性能测试子配置
+    pf = cfg.get("profile", {})
     lat = profile_latency(
         model, tok,
         prefill_len=pf.get("prefill_len", 512),
         decode_tokens=pf.get("decode_tokens", 128),
     )
-    # 4) 显存峰值(须在上面 reset 之后、评测之后读取)
     mem = profile_memory()
     log.info("prefill %.1fms, decode %.1f tok/s, peak %sMB",
              lat["prefill_ms_median"], lat["decode_tps_median"], mem["peak_mb"])
+    return {"ppl": ppl, "latency": lat, "memory": mem}
 
-    # 汇总四类指标 + 原始配置,统一落盘为 results/<exp_id>.json
-    results = {"config": cfg, "size": size, "ppl": ppl,
-               "latency": lat, "memory": mem}
+
+def cmd_eval(args):
+    """M0 子命令:加载 FP16 模型,评测并落盘为基线。"""
+    from lowbitsparse.models import model_size_report
+
+    cfg = load_config(args.config) if args.config else {}
+    set_seed(cfg.get("seed", 42))
+    model, tok = _load(cfg)
+    size = model_size_report(model)   # FP16 体积:压缩比分母
+    log.info("参数量 %.3fM, 体积 %.1fMB", size["params_millions"], size["size_mb"])
+    metrics = _evaluate(model, tok, cfg)
+
+    results = {"config": cfg, "size": size, **metrics}
     path = save_results(results, cfg.get("out_dir", "results"),
                         cfg.get("exp_id", "m0_fp16_baseline"))
+    log.info("结果已保存: %s", path)
+
+
+def cmd_quant(args):
+    """M1 子命令:RTN 伪量化 → 评测 → 报告压缩比,与 FP16 基线对比。"""
+    from lowbitsparse.models import model_size_report
+    from lowbitsparse.quant import (
+        QuantConfig, apply_quantization, compression_report)
+
+    cfg = load_config(args.config) if args.config else {}
+    set_seed(cfg.get("seed", 42))
+    model, tok = _load(cfg)
+
+    fp16 = model_size_report(model)          # 量化前体积(分母)
+    qcfg = QuantConfig.from_dict(cfg.get("quant", {}))
+    model, n = apply_quantization(model, qcfg)   # 就地替换 Linear
+    log.info("已量化 %d 个 Linear (bits=%d, group=%d, sym=%s)",
+             n, qcfg.n_bits, qcfg.group_size, qcfg.symmetric)
+
+    comp = compression_report(model)         # 量化后理论体积 + 等效 bit
+    comp["ratio"] = round(fp16["size_mb"] / comp["size_mb"], 3)  # 压缩比
+    log.info("量化后 %.1fMB, 等效 %.2f bit, 压缩比 %.2fx",
+             comp["size_mb"], comp["effective_bits"], comp["ratio"])
+
+    metrics = _evaluate(model, tok, cfg)     # 复用评测闭环
+    results = {"config": cfg, "size_fp16": fp16, "compression": comp, **metrics}
+    path = save_results(results, cfg.get("out_dir", "results"),
+                        cfg.get("exp_id", "m1_rtn"))
     log.info("结果已保存: %s", path)
 
 
@@ -116,8 +136,13 @@ def build_parser():
     pe.add_argument("--config", type=str, default="configs/qwen0.5b_base.yaml")
     pe.set_defaults(func=cmd_eval)
 
-    # quant/sparse/distill:后续里程碑,先注册占位以保证 CLI 结构完整
-    for name in ("quant", "sparse", "distill"):
+    # quant:M1 已实现,RTN 伪量化 + 压缩比评测
+    pq = sub.add_parser("quant", help="M1: RTN 权重量化 + 评测")
+    pq.add_argument("--config", type=str, default="configs/qwen0.5b_int4.yaml")
+    pq.set_defaults(func=cmd_quant)
+
+    # sparse/distill:后续里程碑,先注册占位以保证 CLI 结构完整
+    for name in ("sparse", "distill"):
         sp = sub.add_parser(name, help=f"{name} (后续里程碑)")
         sp.add_argument("--config", type=str, default=None)
         sp.set_defaults(func=_todo(name))

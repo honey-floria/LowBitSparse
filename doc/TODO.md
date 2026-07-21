@@ -93,15 +93,17 @@ LowBitSparse/
 - [x] 模型加载封装:Qwen2.5-0.5B-Instruct(HF),设备/精度管理
 - [x] 评测器:WikiText-2 PPL + 延迟/显存 profiler(基线数据)
 - [x] Colab notebook:挂载 Drive、装依赖、跑通 FP16 基线
-- [~] **验收**:记录 FP16 基线 PPL、体积、prefill/decode 延迟到 results/(待在 Colab A100 实跑填数)
+- [x] **验收**:FP16 基线已实跑并入库(PPL 14.24 / 942.3MB / 30.4ms·37.2tok/s / 峰值4.57GB,见 OPTIMIZATION.md 速查表)
 
 ### M1 — 权重量化
-- [ ] 伪量化 Linear 层(per-group 对称,scale/zero 存储)
-- [ ] RTN 量化器 + INT8 / INT4 / INT3 支持
+- [x] 伪量化 Linear 层(per-group 对称/非对称,量化元数据记录)
+- [x] RTN 量化器 + INT8 / INT4 / INT3 支持(非整除 group 用 padding)
+- [x] 模型替换 + 理论压缩比/等效 bit 统计(apply.py)
+- [x] 单元测试(round-trip 误差、位宽单调性、padding、对称路径)
 - [ ] GPTQ 量化器(Hessian 校准 + 误差补偿)
 - [ ] AWQ 量化器(激活感知缩放搜索)
 - [ ] group_size 扫描(64/128/256)、per-channel vs per-group
-- [ ] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线
+- [ ] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线(先跑 RTN INT8/INT4 实测)
 
 ### M2 — 稀疏注意力
 - [ ] 注意力 hook / 替换机制(不改原权重)
