@@ -32,8 +32,28 @@
 
 ## 复盘记录
 
-## [待填] M0 — 脚手架与基线
+## [2026-07-20] M0 — 脚手架与基线(代码完成,待实跑)
 **背景 / 目标**:搭好可复现骨架,拿到 FP16 基线,作为一切压缩的对照。
-**分析 / 方案 / 结果 / 结论**:待补充。
+
+**分析**:
+- 原仓库仅有 PyCharm 示例 `main.py` 和空 `doc/`,一切从零开始。
+- 关键约束是 Colab 会断连,基线数据必须可复现且能落 Drive,否则后续 M1-M4 的相对指标无参照。
+- 本地 Windows 无 GPU、无 torch,故把"数值/模型相关"逻辑延迟到函数内 import,使脚手架接线能在本地验证,重活留给 A100。
+
+**方案**:
+- 包结构 `lowbitsparse/{models,quant,sparse,distill,eval,utils}`,CLI 分 `eval|quant|sparse|distill` 四子命令,M0 只实现 `eval`,其余为占位(调用即报错提示对应里程碑)。
+- PPL 用 strided 滑窗法(stride<seqlen 时只对新 token 计损),对齐社区标准算法,避免不重叠切分高估 PPL。
+- profiler 分离 prefill 延迟与 decode 吞吐,warmup + 中位数,降低抖动。
+- 结果统一 `save_results` 落 `results/<exp_id>.json`,内嵌 env(torch/cuda/gpu)保证可复现。
+
+**实验设置**:模型 Qwen2.5-0.5B-Instruct;FP16;seqlen/stride 2048;prefill 512 / decode 128。
+
+**结果**:
+- 本地验证:全文件 `py_compile` 通过;utils/config/CLI parser/save_results 接线跑通;占位命令正确抛出。
+- FP16 基线指标(PPL/体积/延迟/显存):**待 Colab A100 实跑填入**下方基线速查表。
+
+**结论 & 下一步**:
+- 脚手架达标,可在 A100 上直接 `python main.py eval` 出基线。
+- 遗留:①A100 实跑填基线数;②基线确认后进入 M1,先实现 RTN 伪量化打通闭环。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

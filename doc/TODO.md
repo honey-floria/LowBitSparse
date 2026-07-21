@@ -88,12 +88,12 @@ LowBitSparse/
 ## 3. 任务清单
 
 ### M0 — 项目脚手架 & 基线
-- [ ] 初始化目录结构与 `lowbitsparse` 包、`requirements.txt`
-- [ ] `main.py` 改造为 CLI(argparse/typer):`quant|eval|sparse|distill`
-- [ ] 模型加载封装:Qwen2.5-0.5B-Instruct(HF),设备/精度管理
-- [ ] 评测器:WikiText-2 PPL + 延迟/显存 profiler(基线数据)
-- [ ] Colab notebook:挂载 Drive、装依赖、跑通 FP16 基线
-- [ ] **验收**:记录 FP16 基线 PPL、体积、prefill/decode 延迟到 results/
+- [x] 初始化目录结构与 `lowbitsparse` 包、`requirements.txt`
+- [x] `main.py` 改造为 CLI(argparse):`quant|eval|sparse|distill`
+- [x] 模型加载封装:Qwen2.5-0.5B-Instruct(HF),设备/精度管理
+- [x] 评测器:WikiText-2 PPL + 延迟/显存 profiler(基线数据)
+- [x] Colab notebook:挂载 Drive、装依赖、跑通 FP16 基线
+- [~] **验收**:记录 FP16 基线 PPL、体积、prefill/decode 延迟到 results/(待在 Colab A100 实跑填数)
 
 ### M1 — 权重量化
 - [ ] 伪量化 Linear 层(per-group 对称,scale/zero 存储)
