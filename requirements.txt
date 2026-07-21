@@ -1,0 +1,20 @@
+# Core (Colab A100 already ships torch cu12x; pin loosely to avoid conflicts)
+torch>=2.3
+transformers>=4.44
+datasets>=2.20
+accelerate>=0.33
+safetensors>=0.4
+pyyaml>=6.0
+numpy>=1.26
+tqdm>=4.66
+
+# Evaluation
+lm-eval>=0.4.3
+evaluate>=0.4
+
+# Quantization references (used from M1 onward)
+# auto-gptq>=0.7
+# autoawq>=0.2
+
+# Dev / test
+pytest>=8.0

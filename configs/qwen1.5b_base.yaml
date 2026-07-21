@@ -1,0 +1,18 @@
+# M0 基线配置:Qwen2.5-1.5B FP16(M4 复现用)
+exp_id: m0_fp16_baseline_1.5b
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: float16
+  device: cuda
+
+eval:
+  seqlen: 2048
+  stride: 2048
+  max_samples: null
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128

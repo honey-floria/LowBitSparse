@@ -1,0 +1,18 @@
+# M0 基线配置:Qwen2.5-0.5B FP16
+exp_id: m0_fp16_baseline
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16      # A100 也可 bfloat16
+  device: cuda
+
+eval:
+  seqlen: 2048
+  stride: 2048        # 设为 1024 可用重叠窗口获得更准 PPL(更慢)
+  max_samples: null   # 设为整数可快速冒烟测试(如 4)
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128
