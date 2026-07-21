@@ -1,0 +1,49 @@
+# ---- Python 运行产物 ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- 测试 / 覆盖率缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- Claude Code 会话目录 ----
+.claude/
+
+# ---- 操作系统杂项 ----
+.DS_Store
+Thumbs.db
+
+# ---- 模型权重 / 大文件(不入库,按需下载或落 Drive)----
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# ---- 结果目录:保留已提交的指标 json / 报告,忽略临时大产物 ----
+# 注意:results/*.json 与 *.md 是交付物,需入库,故不整体忽略 results/
+results/*.png
+results/*.jpg
+results/checkpoints/
