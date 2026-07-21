@@ -103,7 +103,7 @@ LowBitSparse/
 - [ ] GPTQ 量化器(Hessian 校准 + 误差补偿)
 - [ ] AWQ 量化器(激活感知缩放搜索)
 - [ ] group_size 扫描(64/128/256)、per-channel vs per-group
-- [ ] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线(先跑 RTN INT8/INT4 实测)
+- [~] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线(RTN INT8/INT4 已实测;待补 GPTQ/AWQ 与 group_size 扫描)
 
 ### M2 — 稀疏注意力
 - [ ] 注意力 hook / 替换机制(不改原权重)
