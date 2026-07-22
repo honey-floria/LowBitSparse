@@ -54,6 +54,10 @@ def _run_latency_memory(model, tokenizer, seqlen: int, profile_cfg: dict,
         repeats=profile_cfg.get("repeats", 5),
         past_pruner=past_pruner,
         reset_peak_after_prefill=profile_cfg.get("reset_peak_after_prefill", False),
+        # M2-e 验证:torch.compile+StaticCache 无裁剪 decode。与 past_pruner 互斥
+        # (static cache 形状固定),故仅在 baseline 路径(past_pruner=None)生效。
+        compile_decode=(profile_cfg.get("compile_decode", False)
+                        and past_pruner is None),
     )
     mem = profile_memory()
     return {"latency": lat, "memory": mem}

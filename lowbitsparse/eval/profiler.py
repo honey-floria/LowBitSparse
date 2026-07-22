@@ -55,6 +55,35 @@ def _apply_past_pruner(past, past_pruner):
     return result, None
 
 
+def _try_build_static_decode(model, prefill_len, decode_tokens, device):
+    """尝试构造 torch.compile + StaticCache 的固定形状 decode 闭包(M2-e 验证)。
+
+    背景:当前 eager 逐 token decode 是 overhead-bound —— 0.5B 在 A100 上纯带宽
+    理论 ~0.66ms/step,实测 ~27ms/step,40x 差距来自每步的 kernel launch / Python
+    循环固定开销,而非 KV attention。要验证这个判断,就固定 cache 形状并用
+    torch.compile(reduce-overhead) 把逐步 overhead 折进 CUDA graph。
+
+    注意:StaticCache 形状固定,与 M2-c 每步 index_select 变长裁剪互斥,故这条
+    分支是"无裁剪"基线,只用来量 overhead 上限。任何一步失败都返回 None 安全降级。
+    """
+    if not str(device).startswith("cuda"):
+        return None  # CUDA graph 只在 GPU 有意义
+    try:
+        from transformers import StaticCache
+    except Exception:
+        return None
+    try:
+        max_len = prefill_len + decode_tokens + 1
+        # 固定形状的 KV cache:decode 全程不再 resize,满足 CUDA graph 前提。
+        static_cache = StaticCache(
+            config=model.config, max_batch_size=1, max_cache_len=max_len,
+            device=device, dtype=next(model.parameters()).dtype)
+        compiled = torch.compile(model, mode="reduce-overhead", fullgraph=False)
+        return compiled, static_cache, max_len
+    except Exception:
+        return None
+
+
 @torch.no_grad()   # 性能测试无需梯度
 def profile_latency(
     model,                       # 已 eval 的模型
@@ -66,8 +95,14 @@ def profile_latency(
     device: str = None,          # 设备,None 取模型所在设备
     past_pruner=None,            # 可选:M2-c KV cache 裁剪回调
     reset_peak_after_prefill: bool = False,  # 可选:只统计 decode 阶段峰值显存
+    compile_decode: bool = False,  # 可选:M2-e 验证,torch.compile+StaticCache 无裁剪 decode
 ) -> dict:
-    """测量 prefill 延迟与 decode 吞吐,均取中位数以抵抗抖动。"""
+    """测量 prefill 延迟与 decode 吞吐,均取中位数以抵抗抖动。
+
+    `compile_decode=True` 时额外测一条 torch.compile + StaticCache 的无裁剪 decode,
+    用来验证 decode 是否 overhead-bound(见 `_try_build_static_decode`)。该分支与
+    `past_pruner` 互斥(static cache 形状固定,不能每步裁剪),结果写入 `compiled_decode`。
+    """
     if device is None:
         device = next(model.parameters()).device
     vocab = model.config.vocab_size   # 词表大小,用于生成合法随机 token
@@ -134,6 +169,50 @@ def profile_latency(
             "cache_position_passed": pass_cache_position,
             "reset_peak_after_prefill": reset_peak_after_prefill,
         }
+
+    # ---- 可选:M2-e 验证分支,torch.compile + StaticCache 无裁剪 decode ----
+    # 目的是量出消除逐步 overhead 后 decode 的吞吐上限,与上面的 eager decode 对比。
+    # 若 compile 后 tok/s 大幅跳升,则坐实 decode 为 overhead-bound(而非 KV-bound),
+    # 固定大小 ring-buffer KV cache 值得做;若几乎不变,则瓶颈另有其处。
+    if compile_decode:
+        built = _try_build_static_decode(model, prefill_len, decode_tokens, device)
+        if built is None:
+            result["compiled_decode"] = {
+                "available": False,
+                "reason": "static_cache_or_compile_unavailable",
+            }
+        else:
+            compiled, static_cache, max_len = built
+            compiled_tps = []
+            for i in range(warmup + repeats):
+                static_cache.reset()
+                _sync(device)
+                # prefill 建 cache;首轮触发编译,靠 warmup 吸收。
+                pos = torch.arange(prefill_len, device=device, dtype=torch.long)
+                out = compiled(input_ids, use_cache=True,
+                               past_key_values=static_cache, cache_position=pos)
+                nxt = out.logits[:, -1:].argmax(-1)
+                _sync(device)
+                t2 = time.perf_counter()
+                for step in range(decode_tokens):
+                    cpos = torch.tensor([prefill_len + step], device=device,
+                                        dtype=torch.long)
+                    out = compiled(nxt, use_cache=True,
+                                   past_key_values=static_cache, cache_position=cpos)
+                    nxt = out.logits[:, -1:].argmax(-1)
+                _sync(device)
+                t3 = time.perf_counter()
+                if i >= warmup:
+                    compiled_tps.append(decode_tokens / (t3 - t2))
+            result["compiled_decode"] = {
+                "available": True,
+                "decode_tps_median": round(statistics.median(compiled_tps), 2),
+                "max_cache_len": max_len,
+                "speedup_vs_eager": round(
+                    statistics.median(compiled_tps)
+                    / max(result["decode_tps_median"], 1e-6), 3),
+            }
+
     return result
 
 
