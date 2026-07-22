@@ -1,0 +1,248 @@
+{
+  "exp_id": "m2e_streaming_compile_probe",
+  "env": {
+    "timestamp": "2026-07-22T14:14:06.097565+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "exp_id": "m2e_streaming_compile_probe",
+    "seed": 42,
+    "out_dir": "results",
+    "model": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "sparse": {
+      "mode": "streaming_llm",
+      "window_size": 1024,
+      "sink_size": 64,
+      "block_size": 128,
+      "block_lookback": 1,
+      "cache_pruning": false,
+      "benchmark_lengths": [
+        2048,
+        4096,
+        8192,
+        16384
+      ]
+    },
+    "eval": {
+      "max_samples": null
+    },
+    "profile": {
+      "decode_tokens": 128,
+      "warmup": 2,
+      "repeats": 5,
+      "compile_decode": true
+    }
+  },
+  "size": {
+    "params": 494032768,
+    "params_millions": 494.033,
+    "bytes": 988065536,
+    "size_mb": 942.293
+  },
+  "sparse_config": {
+    "mode": "streaming_llm",
+    "window_size": 1024,
+    "sink_size": 64,
+    "block_size": 128,
+    "block_lookback": 1,
+    "cache_pruning": false,
+    "benchmark_lengths": [
+      2048,
+      4096,
+      8192,
+      16384
+    ]
+  },
+  "rows": [
+    {
+      "seqlen": 2048,
+      "baseline": {
+        "seqlen": 2048,
+        "ppl": {
+          "ppl": 14.2445,
+          "seqlen": 2048,
+          "stride": 2048,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 2048,
+          "decode_tokens": 128,
+          "prefill_ms_median": 32.312,
+          "decode_tps_median": 36.93
+        },
+        "memory": {
+          "peak_mb": 1606.598,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 2048,
+        "ppl": {
+          "ppl": 14.4865,
+          "seqlen": 2048,
+          "stride": 2048,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 2048,
+          "decode_tokens": 128,
+          "prefill_ms_median": 35.875,
+          "decode_tps_median": 33.18
+        },
+        "memory": {
+          "peak_mb": 1614.598,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 0.901,
+        "decode": 0.898
+      },
+      "memory_delta_mb": -8.0
+    },
+    {
+      "seqlen": 4096,
+      "baseline": {
+        "seqlen": 4096,
+        "ppl": {
+          "ppl": 13.0695,
+          "seqlen": 4096,
+          "stride": 4096,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 4096,
+          "decode_tokens": 128,
+          "prefill_ms_median": 46.191,
+          "decode_tps_median": 36.69
+        },
+        "memory": {
+          "peak_mb": 2256.02,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 4096,
+        "ppl": {
+          "ppl": 13.7765,
+          "seqlen": 4096,
+          "stride": 4096,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 4096,
+          "decode_tokens": 128,
+          "prefill_ms_median": 62.776,
+          "decode_tps_median": 32.8
+        },
+        "memory": {
+          "peak_mb": 2288.02,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 0.736,
+        "decode": 0.894
+      },
+      "memory_delta_mb": -32.0
+    },
+    {
+      "seqlen": 8192,
+      "baseline": {
+        "seqlen": 8192,
+        "ppl": {
+          "ppl": 12.3547,
+          "seqlen": 8192,
+          "stride": 8192,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 8192,
+          "decode_tokens": 128,
+          "prefill_ms_median": 100.392,
+          "decode_tps_median": 36.66
+        },
+        "memory": {
+          "peak_mb": 3541.456,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 8192,
+        "ppl": {
+          "ppl": 13.4161,
+          "seqlen": 8192,
+          "stride": 8192,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 8192,
+          "decode_tokens": 128,
+          "prefill_ms_median": 172.318,
+          "decode_tps_median": 32.83
+        },
+        "memory": {
+          "peak_mb": 3669.52,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 0.583,
+        "decode": 0.896
+      },
+      "memory_delta_mb": -128.064
+    },
+    {
+      "seqlen": 16384,
+      "baseline": {
+        "seqlen": 16384,
+        "ppl": {
+          "ppl": 11.9289,
+          "seqlen": 16384,
+          "stride": 16384,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 16384,
+          "decode_tokens": 128,
+          "prefill_ms_median": 229.074,
+          "decode_tps_median": 36.73
+        },
+        "memory": {
+          "peak_mb": 6121.818,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 16384,
+        "ppl": {
+          "ppl": 13.2824,
+          "seqlen": 16384,
+          "stride": 16384,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 16384,
+          "decode_tokens": 128,
+          "prefill_ms_median": 536.38,
+          "decode_tps_median": 28.44
+        },
+        "memory": {
+          "peak_mb": 6633.873,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 0.427,
+        "decode": 0.774
+      },
+      "memory_delta_mb": -512.055
+    }
+  ]
+}
