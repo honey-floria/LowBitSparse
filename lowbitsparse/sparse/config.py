@@ -39,6 +39,7 @@ class SparseConfig:
         block_size:       block_sparse 的块边长。
         block_lookback:   块稀疏里向后保留几个块。
         cache_pruning:    是否启用 StreamingLLM KV cache 裁剪(M2-c)。
+        ring_graph:       是否启用 M2-e 有界 ring-buffer KV cache + CUDA graph decode。
         benchmark_lengths: benchmark 统一评测的序列长度集合。
     """
 
@@ -48,6 +49,7 @@ class SparseConfig:
     block_size: int = 128
     block_lookback: int = 1
     cache_pruning: bool = False
+    ring_graph: bool = False
     benchmark_lengths: tuple = (2048, 4096, 8192, 16384)
 
     @classmethod

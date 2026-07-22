@@ -17,6 +17,7 @@ from lowbitsparse.utils import get_logger
 from .apply import install_sparse_attention
 from .cache import prune_streaming_past_key_values
 from .config import SparseConfig
+from .ring_cache import build_ring_graph_decode
 
 
 log = get_logger()
@@ -113,6 +114,7 @@ def _sparse_config_payload(sparse_cfg: SparseConfig, lengths: tuple) -> dict:
         "block_size": sparse_cfg.block_size,
         "block_lookback": sparse_cfg.block_lookback,
         "cache_pruning": sparse_cfg.cache_pruning,
+        "ring_graph": getattr(sparse_cfg, "ring_graph", False),
         "benchmark_lengths": list(lengths),
     }
 
@@ -124,6 +126,9 @@ def benchmark_sparse_attention(model, tokenizer, sparse_cfg: SparseConfig,
 
     返回结果已经整理成 JSON 友好的结构,可直接交给 `save_results` 落盘。
     """
+    if getattr(sparse_cfg, "ring_graph", False):
+        return benchmark_streaming_ring_graph(
+            model, tokenizer, sparse_cfg, eval_cfg=eval_cfg, profile_cfg=profile_cfg)
     if sparse_cfg.cache_pruning:
         return benchmark_streaming_kv_pruning(
             model, tokenizer, sparse_cfg, eval_cfg=eval_cfg, profile_cfg=profile_cfg)
@@ -204,6 +209,81 @@ def benchmark_streaming_kv_pruning(model, tokenizer, sparse_cfg: SparseConfig,
         "quality_note": (
             "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;"
             "latency/memory 使用真实 KV cache 裁剪路径。"
+        ),
+        "rows": _rows_from_runs(baseline, sparse),
+    }
+
+
+def benchmark_streaming_ring_graph(model, tokenizer, sparse_cfg: SparseConfig,
+                                   eval_cfg: dict = None,
+                                   profile_cfg: dict = None) -> dict:
+    """M2-e:有界 ring-buffer KV cache + CUDA graph decode benchmark。
+
+    质量指标仍用 StreamingLLM additive mask 的 teacher-forced PPL 作参考(同 M2-b/M2-c);
+    decode latency / memory 走真实 ring-buffer + CUDA graph replay 路径(见 ring_cache)。
+    prefill 不是 M2-e 的优化对象,speedup 只看 decode;sparse 行的 prefill 沿用 baseline
+    值(speedup=1.0),避免误导。
+    """
+    if sparse_cfg.mode != "streaming_llm":
+        raise ValueError("M2-e ring_graph 当前只支持 mode=streaming_llm")
+
+    lengths = tuple(sparse_cfg.benchmark_lengths)
+    profile_cfg = profile_cfg or {}
+    baseline = []
+    for length in lengths:
+        log.info("[M2-e] baseline benchmark seqlen=%d", length)
+        baseline.append({"seqlen": length, **_run_one(model, tokenizer, length,
+                                                     eval_cfg, profile_cfg)})
+
+    # 质量:additive mask teacher-forced PPL(仅参考,同 M2-c)。
+    patch = install_sparse_attention(model, sparse_cfg)
+    try:
+        sparse_ppl = []
+        for length in lengths:
+            log.info("[M2-e] sparse quality(reference mask) seqlen=%d", length)
+            sparse_ppl.append({"seqlen": length, "ppl": _run_ppl(model, tokenizer,
+                                                                 length, eval_cfg)})
+    finally:
+        patch.restore()
+
+    # decode latency/memory:ring-buffer + CUDA graph replay。
+    sparse = []
+    for item, base in zip(sparse_ppl, baseline):
+        length = item["seqlen"]
+        log.info("[M2-e] ring+graph decode seqlen=%d", length)
+        rg = build_ring_graph_decode(
+            model, sink_size=sparse_cfg.sink_size, window_size=sparse_cfg.window_size,
+            prefill_len=length, decode_tokens=profile_cfg.get("decode_tokens", 128),
+            warmup=profile_cfg.get("warmup", 2), repeats=profile_cfg.get("repeats", 5),
+            device=next(model.parameters()).device)
+        # 组装成与 _rows_from_runs 兼容的行:decode 用 graph tps,prefill 沿用 baseline,
+        # memory 用 ring decode 阶段峰值(恒定)。graph 不可用时回退 baseline 值并标注。
+        if rg.get("available"):
+            decode_tps = rg["decode_tps_median"]
+            peak_mb = rg["decode_peak_mb"]
+        else:
+            decode_tps = base["latency"]["decode_tps_median"]
+            peak_mb = base["memory"]["peak_mb"]
+        sparse.append({
+            "seqlen": length,
+            "ppl": item["ppl"],
+            "latency": {
+                "prefill_len": length,
+                "decode_tokens": profile_cfg.get("decode_tokens", 128),
+                "prefill_ms_median": base["latency"]["prefill_ms_median"],  # 非优化对象
+                "decode_tps_median": decode_tps,
+                "ring_graph": rg,
+            },
+            "memory": {"peak_mb": peak_mb, "current_mb": base["memory"]["current_mb"]},
+        })
+
+    return {
+        "sparse_config": _sparse_config_payload(sparse_cfg, lengths),
+        "benchmark_kind": "streaming_ring_graph",
+        "quality_note": (
+            "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;"
+            "decode latency/memory 使用 ring-buffer KV cache + CUDA graph replay 路径;"
+            "prefill 非 M2-e 优化对象,沿用 baseline 值。"
         ),
         "rows": _rows_from_runs(baseline, sparse),
     }

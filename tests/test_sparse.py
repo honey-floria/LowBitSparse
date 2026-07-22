@@ -225,3 +225,74 @@ def test_install_streaming_kv_pruning_layers_cache():
         assert handle.last_stats.applied
     finally:
         handle.restore()
+
+
+# ---- M2-e RingKVCache(回绕 KV cache)----
+from lowbitsparse.sparse.ring_cache import RingKVCache
+
+
+def test_ring_cache_prefill_returns_full_kv():
+    """prefill 必须返回真实完整 K/V(形状匹配 attention),不能返回截短 buffer。"""
+    cache = RingKVCache(sink_size=2, window_size=3)
+    k = torch.randn(1, 2, 10, 4)
+    v = torch.randn(1, 2, 10, 4)
+    rk, rv = cache.update(k, v, layer_idx=0)
+    assert rk.shape[-2] == 10 and rv.shape[-2] == 10
+    assert torch.equal(rk, k)
+    # 内部 buffer 恒定为 sink+window=5。
+    assert cache.key_buf[0].shape[-2] == 5
+
+
+def test_ring_cache_decode_returns_constant_shape():
+    """decode 每步返回恒定形状 buffer(CUDA graph replay 的前提)。"""
+    cache = RingKVCache(sink_size=2, window_size=3)
+    cache.update(torch.randn(1, 2, 10, 4), torch.randn(1, 2, 10, 4), 0)
+    shapes = set()
+    for _ in range(20):
+        rk, rv = cache.update(torch.randn(1, 2, 1, 4), torch.randn(1, 2, 1, 4), 0)
+        shapes.add(tuple(rk.shape))
+    # 20 步 decode 形状全程不变,且等于 sink+window。
+    assert shapes == {(1, 2, 5, 4)}
+
+
+def test_ring_cache_sink_preserved_window_wraps():
+    """sink 段永久保留;window 段循环覆盖最老槽位。"""
+    cache = RingKVCache(sink_size=2, window_size=3)
+    # prefill 用可辨识的常量填充:每个 token 位置 t 的值全为 t。
+    k = torch.stack([torch.full((1, 2, 4), float(t)) for t in range(6)], dim=2)
+    v = k.clone()
+    cache.update(k, v, 0)
+    kbuf = cache.key_buf[0]
+    # sink = 前 2 个 token(值 0,1)。
+    assert kbuf[0, 0, 0, 0].item() == 0.0
+    assert kbuf[0, 0, 1, 0].item() == 1.0
+    # window 初始 = 最后 3 个 token(值 3,4,5),写指针回到 0。
+    assert kbuf[0, 0, 2, 0].item() == 3.0
+    assert kbuf[0, 0, 4, 0].item() == 5.0
+    assert cache._wptr[0] == 0
+
+    # decode 一个值为 99 的 token:覆盖 window 槽位 0(buffer index sink+0=2)。
+    cache.update(torch.full((1, 2, 1, 4), 99.0), torch.full((1, 2, 1, 4), 99.0), 0)
+    assert kbuf[0, 0, 2, 0].item() == 99.0
+    # sink 段不受影响。
+    assert kbuf[0, 0, 0, 0].item() == 0.0
+    assert kbuf[0, 0, 1, 0].item() == 1.0
+    assert cache._wptr[0] == 1
+
+
+def test_ring_cache_seq_length_capped():
+    """get_seq_length 不超过 sink+window(cache 大小恒定,不随 decode 增长)。"""
+    cache = RingKVCache(sink_size=2, window_size=3)
+    cache.update(torch.randn(1, 2, 6, 4), torch.randn(1, 2, 6, 4), 0)
+    for _ in range(50):
+        cache.update(torch.randn(1, 2, 1, 4), torch.randn(1, 2, 1, 4), 0)
+    assert cache.get_seq_length(0) == 5
+
+
+def test_ring_cache_reset_clears():
+    cache = RingKVCache(sink_size=2, window_size=3)
+    cache.update(torch.randn(1, 2, 6, 4), torch.randn(1, 2, 6, 4), 0)
+    cache.reset()
+    assert cache.get_seq_length(0) == 0
+    assert cache._wptr[0] == 0
+    assert torch.count_nonzero(cache.key_buf[0]) == 0

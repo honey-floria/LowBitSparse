@@ -1,0 +1,31 @@
+# M2-e 配置:Qwen2.5-0.5B 有界 ring-buffer KV cache + CUDA graph decode
+# 目标:decode ~3x speedup(远超 M2-c 的 1.2x)+ 恒定显存。
+# 质量沿用 StreamingLLM additive mask teacher-forced PPL 参考;latency/memory 走
+# ring-buffer + CUDA graph replay 真实路径。不做 RoPE 相位忠实修正(见 ring_cache 说明)。
+exp_id: m2e_streaming_ringgraph_s64_w1024
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+sparse:
+  mode: streaming_llm
+  window_size: 1024
+  sink_size: 64
+  block_size: 128
+  block_lookback: 1
+  cache_pruning: false
+  ring_graph: true
+  benchmark_lengths: [2048, 4096, 8192, 16384]
+
+eval:
+  max_samples: null
+
+profile:
+  decode_tokens: 128
+  warmup: 2
+  repeats: 5
+  reset_peak_after_prefill: true
