@@ -1,38 +1,15 @@
 {
   "exp_id": "m1_rtn_int4_g128",
   "env": {
-    "timestamp": "2026-07-22T01:57:24.378512+00:00",
+    "timestamp": "2026-07-22T02:02:03.694856+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
   },
   "config": {
-    "exp_id": "m1_rtn_int4_g128",
-    "seed": 42,
-    "out_dir": "results",
-    "model": {
-      "name": "Qwen/Qwen2.5-0.5B-Instruct",
-      "dtype": "float16",
-      "device": "cuda"
-    },
-    "quant": {
-      "method": "rtn",
-      "n_bits": 4,
-      "group_size": 128,
-      "symmetric": false,
-      "skip": [
-        "lm_head"
-      ]
-    },
-    "eval": {
-      "seqlen": 2048,
-      "stride": 2048,
-      "max_samples": null
-    },
-    "profile": {
-      "prefill_len": 512,
-      "decode_tokens": 128
-    }
+    "method": "rtn",
+    "n_bits": 4,
+    "group_size": 128
   },
   "size_fp16": {
     "params": 494032768,
@@ -51,15 +28,5 @@
     "seqlen": 2048,
     "stride": 2048,
     "n_tokens": 299078
-  },
-  "latency": {
-    "prefill_len": 512,
-    "decode_tokens": 128,
-    "prefill_ms_median": 29.497,
-    "decode_tps_median": 37.9
-  },
-  "memory": {
-    "peak_mb": 4573.091,
-    "current_mb": 958.042
   }
 }

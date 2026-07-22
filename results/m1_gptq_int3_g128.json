@@ -1,14 +1,14 @@
 {
-  "exp_id": "m1_rtn_int8_g128",
+  "exp_id": "m1_gptq_int3_g128",
   "env": {
-    "timestamp": "2026-07-22T02:01:45.521319+00:00",
+    "timestamp": "2026-07-22T02:07:09.126428+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
   },
   "config": {
-    "method": "rtn",
-    "n_bits": 8,
+    "method": "gptq",
+    "n_bits": 3,
     "group_size": 128
   },
   "size_fp16": {
@@ -19,12 +19,12 @@
   },
   "compression": {
     "quant_weights": 357826560,
-    "effective_bits": 8.251,
-    "size_mb": 611.707,
-    "ratio": 1.54
+    "effective_bits": 3.251,
+    "size_mb": 398.426,
+    "ratio": 2.365
   },
   "ppl": {
-    "ppl": 14.2326,
+    "ppl": 22.4794,
     "seqlen": 2048,
     "stride": 2048,
     "n_tokens": 299078
