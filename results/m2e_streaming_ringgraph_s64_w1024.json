@@ -1,0 +1,288 @@
+{
+  "exp_id": "m2e_streaming_ringgraph_s64_w1024",
+  "env": {
+    "timestamp": "2026-07-22T15:54:47.864365+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "exp_id": "m2e_streaming_ringgraph_s64_w1024",
+    "seed": 42,
+    "out_dir": "results",
+    "model": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "sparse": {
+      "mode": "streaming_llm",
+      "window_size": 1024,
+      "sink_size": 64,
+      "block_size": 128,
+      "block_lookback": 1,
+      "cache_pruning": false,
+      "ring_graph": true,
+      "benchmark_lengths": [
+        2048,
+        4096,
+        8192,
+        16384
+      ]
+    },
+    "eval": {
+      "max_samples": null
+    },
+    "profile": {
+      "decode_tokens": 128,
+      "warmup": 2,
+      "repeats": 5,
+      "reset_peak_after_prefill": true
+    }
+  },
+  "size": {
+    "params": 494032768,
+    "params_millions": 494.033,
+    "bytes": 988065536,
+    "size_mb": 942.293
+  },
+  "sparse_config": {
+    "mode": "streaming_llm",
+    "window_size": 1024,
+    "sink_size": 64,
+    "block_size": 128,
+    "block_lookback": 1,
+    "cache_pruning": false,
+    "ring_graph": true,
+    "benchmark_lengths": [
+      2048,
+      4096,
+      8192,
+      16384
+    ]
+  },
+  "benchmark_kind": "streaming_ring_graph",
+  "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;decode latency/memory 使用 ring-buffer KV cache + CUDA graph replay 路径;prefill 非 M2-e 优化对象,沿用 baseline 值。",
+  "rows": [
+    {
+      "seqlen": 2048,
+      "baseline": {
+        "seqlen": 2048,
+        "ppl": {
+          "ppl": 14.2445,
+          "seqlen": 2048,
+          "stride": 2048,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 2048,
+          "decode_tokens": 128,
+          "prefill_ms_median": 32.992,
+          "decode_tps_median": 36.43
+        },
+        "memory": {
+          "peak_mb": 1602.808,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 2048,
+        "ppl": {
+          "ppl": 14.4865,
+          "seqlen": 2048,
+          "stride": 2048,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 2048,
+          "decode_tokens": 128,
+          "prefill_ms_median": 32.992,
+          "decode_tps_median": 194.58,
+          "ring_graph": {
+            "available": true,
+            "method": "ring_cuda_graph_replay",
+            "decode_tps_median": 194.58,
+            "decode_peak_mb": 1584.326,
+            "cache_len": 1088,
+            "sink_size": 64,
+            "window_size": 1024
+          }
+        },
+        "memory": {
+          "peak_mb": 1584.326,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.0,
+        "decode": 5.341
+      },
+      "memory_delta_mb": 18.482
+    },
+    {
+      "seqlen": 4096,
+      "baseline": {
+        "seqlen": 4096,
+        "ppl": {
+          "ppl": 13.0695,
+          "seqlen": 4096,
+          "stride": 4096,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 4096,
+          "decode_tokens": 128,
+          "prefill_ms_median": 45.992,
+          "decode_tps_median": 36.16
+        },
+        "memory": {
+          "peak_mb": 2248.73,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 4096,
+        "ppl": {
+          "ppl": 13.7765,
+          "seqlen": 4096,
+          "stride": 4096,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 4096,
+          "decode_tokens": 128,
+          "prefill_ms_median": 45.992,
+          "decode_tps_median": 192.48,
+          "ring_graph": {
+            "available": true,
+            "method": "ring_cuda_graph_replay",
+            "decode_tps_median": 192.48,
+            "decode_peak_mb": 2187.482,
+            "cache_len": 1088,
+            "sink_size": 64,
+            "window_size": 1024
+          }
+        },
+        "memory": {
+          "peak_mb": 2187.482,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.0,
+        "decode": 5.323
+      },
+      "memory_delta_mb": 61.248
+    },
+    {
+      "seqlen": 8192,
+      "baseline": {
+        "seqlen": 8192,
+        "ppl": {
+          "ppl": 12.3547,
+          "seqlen": 8192,
+          "stride": 8192,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 8192,
+          "decode_tokens": 128,
+          "prefill_ms_median": 100.329,
+          "decode_tps_median": 36.48
+        },
+        "memory": {
+          "peak_mb": 3527.166,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 8192,
+        "ppl": {
+          "ppl": 13.4161,
+          "seqlen": 8192,
+          "stride": 8192,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 8192,
+          "decode_tokens": 128,
+          "prefill_ms_median": 100.329,
+          "decode_tps_median": 192.86,
+          "ring_graph": {
+            "available": true,
+            "method": "ring_cuda_graph_replay",
+            "decode_tps_median": 192.86,
+            "decode_peak_mb": 3382.669,
+            "cache_len": 1088,
+            "sink_size": 64,
+            "window_size": 1024
+          }
+        },
+        "memory": {
+          "peak_mb": 3382.669,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.0,
+        "decode": 5.287
+      },
+      "memory_delta_mb": 144.497
+    },
+    {
+      "seqlen": 16384,
+      "baseline": {
+        "seqlen": 16384,
+        "ppl": {
+          "ppl": 11.9289,
+          "seqlen": 16384,
+          "stride": 16384,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 16384,
+          "decode_tokens": 128,
+          "prefill_ms_median": 217.888,
+          "decode_tps_median": 36.07
+        },
+        "memory": {
+          "peak_mb": 6093.46,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 16384,
+        "ppl": {
+          "ppl": 13.2824,
+          "seqlen": 16384,
+          "stride": 16384,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 16384,
+          "decode_tokens": 128,
+          "prefill_ms_median": 217.888,
+          "decode_tps_median": 193.8,
+          "ring_graph": {
+            "available": true,
+            "method": "ring_cuda_graph_replay",
+            "decode_tps_median": 193.8,
+            "decode_peak_mb": 5765.919,
+            "cache_len": 1088,
+            "sink_size": 64,
+            "window_size": 1024
+          }
+        },
+        "memory": {
+          "peak_mb": 5765.919,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.0,
+        "decode": 5.373
+      },
+      "memory_delta_mb": 327.541
+    }
+  ]
+}
