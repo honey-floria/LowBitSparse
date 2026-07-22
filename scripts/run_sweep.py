@@ -2,9 +2,11 @@
 
 用法(Colab / A100 上运行):
     python scripts/run_sweep.py [--config configs/qwen0.5b_int4.yaml] \
-        [--smoke]      # smoke 时每组只评 4 个窗口,快速验证流程可跑通
+        [--smoke]         # smoke 时每组只评 4 个窗口,快速验证流程可跑通
+        [--only awq]      # 只跑指定方法(rtn/gptq/awq),如重跑 AWQ 刷新结果
+        [--no-emb]        # 跳过 embedding 量化消融(EMB_GRID)
 
-脚本根据 BASE_GRID 定义的超参网格,逐一构造 QuantConfig,调用
+脚本根据 BASE_GRID(+ EMB_GRID)定义的超参网格,逐一构造 QuantConfig,调用
 main.py 的量化+评测逻辑,结果写入 results/<exp_id>.json。
 所有组合跑完后打印一行总结,告知几成功几失败,方便 Colab 监控。
 """
@@ -118,12 +120,28 @@ def main():
     p = argparse.ArgumentParser(description="M1 量化扫描")
     p.add_argument("--config", default="configs/qwen0.5b_int4.yaml")
     p.add_argument("--smoke", action="store_true", help="每组只评 4 个窗口")
+    p.add_argument("--only", choices=("rtn", "gptq", "awq"), default=None,
+                   help="只跑指定方法的组合(如 --only awq 重跑 AWQ);默认跑全部")
+    p.add_argument("--no-emb", action="store_true",
+                   help="跳过 embedding 量化消融(EMB_GRID)")
     args = p.parse_args()
 
     log = get_logger()
     base_cfg = load_config(args.config)
+
+    # 按 --only 过滤两张网格(EMB_GRID 元组多一个 embedding_bits 字段)
+    base_grid = [g for g in BASE_GRID if args.only is None or g[0] == args.only]
+    emb_grid = [] if args.no_emb else [
+        g for g in EMB_GRID if args.only is None or g[0] == args.only]
+    total = len(base_grid) + len(emb_grid)
+    if total == 0:
+        log.warning("--only %s 未匹配任何组合,退出", args.only)
+        return
+    log.info("本次将跑 %d 组(--only=%s, no_emb=%s)",
+             total, args.only, args.no_emb)
+
     ok = fail = 0
-    for method, n_bits, gs, sym in BASE_GRID:
+    for method, n_bits, gs, sym in base_grid:
         try:
             run_one(base_cfg, method, n_bits, gs, sym, args.smoke)
             ok += 1
@@ -132,7 +150,7 @@ def main():
             log.error("组合 %s 失败:\n%s",
                       _exp_id(method, n_bits, gs), traceback.format_exc())
     # embedding 量化消融(linears 固定 GPTQ INT4 g128,只变 embedding 位宽)
-    for method, n_bits, gs, sym, e_bits in EMB_GRID:
+    for method, n_bits, gs, sym, e_bits in emb_grid:
         try:
             run_one(base_cfg, method, n_bits, gs, sym, args.smoke,
                     embedding_bits=e_bits)
@@ -142,7 +160,6 @@ def main():
             log.error("组合 %s 失败:\n%s",
                       _exp_id(method, n_bits, gs, e_bits),
                       traceback.format_exc())
-    total = len(BASE_GRID) + len(EMB_GRID)
     log.info("扫描结束:成功 %d, 失败 %d(共 %d 组)", ok, fail, total)
 
 

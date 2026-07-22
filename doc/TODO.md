@@ -135,7 +135,7 @@ LowBitSparse/
       实测:emb INT8 = 2.99x @ PPL 15.43(≈纯 GPTQ INT4,几乎白拿);emb INT4 = 3.76x @ PPL 16.69。
       结论:emb INT8 帕累托支配纯 GPTQ INT4,升级为默认推荐;3.5-4x deliverable 达成。
 - [x] M1 收尾优化:量化后释放 `calib_stats`(`free_calib_stats`,main.py/run_sweep.py 评测前调用;cpu_smoke step7 演示)
-      代码已落地并 CPU 验证;GPU 峰值应从 ~7187MB 回落到接近基线 4574MB,待下次 A100 跑确认。
+      A100 已确认:embint 跑日志显示释放 2607.9MB,peak 从 ~7187MB 回落到 4574MB(=基线),预测兑现。
 
 ### M2 — 稀疏注意力
 - [ ] 注意力 hook / 替换机制(不改原权重)
