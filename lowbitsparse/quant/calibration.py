@@ -86,3 +86,23 @@ def collect_calib_stats(model, calib_ids: torch.Tensor, target_names: list,
         }
         for n in target_names
     }
+
+
+def free_calib_stats(stats: dict) -> float:
+    """量化完成后释放校准统计,回收显存。返回释放的字节数(MB)。
+
+    每层 Hessian 是 [in_f, in_f] float32,大层(如 down_proj in_f≈4864)单层
+    可达 ~95MB,全模型累计数 GB。量化替换后 H/act_scales 已无用,及时清空引用
+    并 empty_cache,避免在后续 PPL/延迟评测阶段白白常驻显存。
+    """
+    if not stats:
+        return 0.0
+    freed = 0
+    for layer in stats.values():
+        for t in layer.values():
+            if hasattr(t, "numel"):
+                freed += t.numel() * t.element_size()
+    stats.clear()                              # 断掉调用方持有的引用
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return round(freed / 1024 / 1024, 1)

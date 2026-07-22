@@ -160,8 +160,10 @@
 [步骤7] 端到端校准流水线:collect_calib_stats -> apply_quantization
   [gptq] 校准层数=4, 替换=4, 等效4.294bit, 输出相对差异=11.4153%
        down_proj: H(1024, 1024) act(1024,) -> FakeQuantLinear
+       释放校准统计 4.8 MB(真实 0.5B 上每层 H 可达 ~95MB,累计数 GB);清空后 stats 层数=0
   [awq] 校准层数=4, 替换=4, 等效4.294bit, 输出相对差异=10.8592%
        down_proj: H(1024, 1024) act(1024,) -> FakeQuantLinear
+       释放校准统计 4.8 MB(真实 0.5B 上每层 H 可达 ~95MB,累计数 GB);清空后 stats 层数=0
 ```
 
 **脚本位置**:`scripts/cpu_smoke.py` `step7_calib_pipeline()`
@@ -177,9 +179,48 @@
 | 就地替换 | `quant/apply.py` `apply_quantization` | 传入预量化 w_dq 构造 FakeQuantLinear |
 | 持有预量化权重 | `quant/fake_linear.py` `__init__(w_dq=...)` | w_dq 非空则跳过内部 RTN |
 | 压缩统计 | `quant/apply.py` `compression_report` | 等效 bit / 体积,与方法无关 |
+| 释放校准统计 | `quant/calibration.py` `free_calib_stats` | 量化后清空 H/act,估算并回收显存;`main.py`/`run_sweep.py` 评测前均调用 |
 
 > 真实 0.5B 模型 + WikiText-2 校准的完整流程见 `scripts/run_sweep.py`(需 GPU/下载模型),
 > 结果用 `scripts/summarize.py` 一键汇总成验收表格。CLI 入口为 `main.py cmd_quant`。
+> **显存提示**:GPTQ/AWQ 校准 H 每层 float32 [in,in](0.5B 的 down_proj ~95MB,累计数 GB);
+> 量化替换后即由 `free_calib_stats` 释放,故评测阶段显存回落到接近基线(见 OPTIMIZATION M1-d)。
+
+---
+
+## 步骤8 — embedding 量化消融(绑定权重,突破压缩地板)
+
+前 7 步 embedding 始终 FP16(skip),是压缩地板(真实 0.5B 占量化后体积 ~42%)。
+步骤 8 演示量化 embedding:绑定(tied)模型下 embed_tokens 与 lm_head 是同一张量,
+量化一次、两者共享,压缩比才真正下降(否则拆散绑定反而变大)。
+
+**脚本输出**
+```
+[步骤8] embedding 量化消融(绑定权重,embed/lm_head 共享)
+  基线(emb FP16):  等效 4.312 bit, 体积 1.01 MB
+  消融(emb INT8):  等效 7.447 bit, 体积 0.285 MB
+  embed 类型: FakeQuantEmbedding, lm_head 类型: FakeQuantLinear
+  绑定保持(embed.weight is lm_head.weight): True
+  量化后 forward 输出 shape: (2, 16, 1000), 数值有限: True
+```
+> 注:TinyLM 里 embedding 占绝对多数(vocab 1000×256 且绑定),故量化它体积骤降;
+> 等效 bit 升高是因 INT8 embedding 权重数远多于 INT4 linears,拉高了加权均值——
+> 这是玩具规模的失真,真实 0.5B 的账见 OPTIMIZATION M1-g。
+
+**脚本位置**:`scripts/cpu_smoke.py` `step8_embedding_quant()`(用 `TiedTinyLM` 绑定模型)
+
+**对应源码**
+
+| 输出/动作 | 源码 | 说明 |
+| --- | --- | --- |
+| 量化 embedding | `quant/apply.py` `_quantize_embedding` | 沿 embedding_dim 分组 RTN,替换 embed_tokens |
+| 绑定检测 | `quant/apply.py` `_quantize_embedding` | `out.weight is emb.weight` → lm_head 复用同一 w_dq |
+| 伪量化 Embedding 层 | `quant/fake_embedding.py` `FakeQuantEmbedding` | 缓存反量化权重,forward 走 `F.embedding` |
+| 共享 buffer 去重 | `quant/apply.py` `compression_report` | 按 `id(weight)` 去重,绑定矩阵只计一次 |
+| embedding 位宽 | `quant/config.py` `embedding_bits` | None 沿用 n_bits;可与 linears 分设 |
+
+> 真实实验(linears GPTQ INT4 + embedding INT8/INT4)由 `run_sweep.py` 的 `EMB_GRID`
+> 或 `configs/qwen0.5b_gptq_int4_embint{8,4}.yaml` 触发。
 
 ---
 

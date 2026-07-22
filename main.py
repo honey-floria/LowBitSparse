@@ -95,7 +95,7 @@ def cmd_quant(args):
     """M1:执行权重量化、精度评测和压缩比统计。"""
     from lowbitsparse.models import model_size_report
     from lowbitsparse.quant import (
-        QuantConfig, apply_quantization, compression_report)
+        QuantConfig, apply_quantization, compression_report, free_calib_stats)
 
     cfg = load_config(args.config) if args.config else {}
     set_seed(cfg.get("seed", 42))
@@ -107,6 +107,11 @@ def cmd_quant(args):
     model, n = apply_quantization(model, qcfg, calib_stats=calib_stats)
     log.info("已量化 %d 个 Linear (method=%s, bits=%d, group=%d, sym=%s)",
              n, qcfg.method, qcfg.n_bits, qcfg.group_size, qcfg.symmetric)
+
+    # 校准统计已用完,评测前释放,避免 Hessian 常驻拉高显存峰值。
+    freed = free_calib_stats(calib_stats)
+    if freed:
+        log.info("已释放校准统计 %.1f MB", freed)
 
     comp = compression_report(model)
     comp["ratio"] = round(fp16["size_mb"] / comp["size_mb"], 3)

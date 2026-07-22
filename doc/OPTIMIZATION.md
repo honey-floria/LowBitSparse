@@ -195,23 +195,46 @@
 ## [2026-07-22] M1-f — group_size × bit 全扫描(GPTQ 鲁棒性坐实,拐点确立)
 **背景 / 目标**:用 `run_sweep.py` 跑 method×bit×group 全组合,填充验收表的粒度维,给出"压缩比 vs 精度"完整权衡,并回答 group_size / bit 各自的收益边界。
 
-**实验设置**:Qwen2.5-0.5B;RTN/GPTQ/AWQ;INT4 group∈{64,128,256,per-channel(仅 RTN)}+ INT3 g128;非对称;skip=lm_head;GPTQ/AWQ 校准 128×512;seqlen/stride 2048。数据源 `results/m1_summary.md` 及各 `m1_*.json`。g128 三点与 M1-c/d/e 单跑值一致(seed=42 复现)。
+**实验设置**:Qwen2.5-0.5B;RTN/GPTQ/AWQ;INT4 group∈{64,128,256,per-channel}+ INT3 g128;非对称;skip=lm_head;GPTQ/AWQ 校准 128×512;seqlen/stride 2048。数据源 `results/m1_summary.md` 及各 `m1_*.json`。g128 三点与 M1-c/d/e 单跑值一致(seed=42 复现)。per-channel 的 GPTQ/AWQ 两点为后补(见下方"补充"),已并入本表。
 
-**结果(ΔPPL,粗体为该 group 最优)**:
-| group | RTN | AWQ | GPTQ | 压缩比 |
-| --- | --- | --- | --- | --- |
-| g64 | +1.884 | +1.463 | **+0.887** | 2.09x |
-| g128 | +2.813 | +2.074 | **+1.190** | 2.14x |
-| g256 | +4.620 | +2.986 | **+1.508** | 2.16x |
-| per-channel | +12.641 | — | — | 2.18x |
-| INT3 g128 | +51.451 | +17.123 | **+8.235** | 2.37x |
+**结果(ΔPPL,粗体为该 group 最优;末列 GPTQ 消除 RTN 缺口比例)**:
+
+| group | RTN | AWQ | GPTQ | 压缩比 | GPTQ 恢复比例 |
+| --- | --- | --- | --- | --- | --- |
+| g64 | +1.884 | +1.463 | **+0.887** | 2.09x | 52.9% |
+| g128 | +2.813 | +2.074 | **+1.190** | 2.14x | 57.7% |
+| g256 | +4.620 | +2.986 | **+1.508** | 2.16x | 67.4% |
+| per-channel | +12.641 | +6.321 | **+3.084** | 2.18x | 75.6% |
+| INT3 g128 | +51.451 | +17.123 | **+8.235** | 2.37x | 84.0% |
 
 **关键分析**:
 1. **方法排序 GPTQ<AWQ<RTN 在每个配置下无一例外成立**,误差补偿的价值是稳健的,非某一超参下的偶然。
 2. **group_size 是纯精度旋钮、几乎非压缩旋钮**:INT4 四档压缩比仅 2.09–2.18x 浮动(等效 bit 4.028–4.501),因 embedding 地板占大头,group 改的只是每组 scale/zero 开销的零头。cpu_smoke 的合成单调性锚点在 0.5B 上坐实(组越小 PPL 越低)。
-3. **本次最有价值的新发现——量化越激进,GPTQ 相对 RTN 价值越大**:g128→g256,RTN 恶化 +1.81 而 GPTQ 仅 +0.32;INT4→INT3,RTN 崩(+51.45)而 GPTQ 尚可用(+8.24);per-channel RTN 崩(+12.64)。RTN 逐组无补偿,粒度一粗/bit 一低就撑不住;GPTQ 用 Hinv 把误差摊到后续列,吃得下粗粒度。
-4. **拐点与边界**:精度最优 GPTQ g64(+0.89@2.09x);性价比拐点 GPTQ g128(+1.19@2.14x,降 g64 仅多省 0.3 PPL 却掉 0.05x 压缩,边际薄);INT3 不划算(即便 GPTQ +8.24,压缩仅 2.14→2.37x)。**结论:要突破 ~2.4x 得动 embedding,不是降 bit。**
+3. **量化越激进,GPTQ 相对 RTN 价值越大——补完 per-channel 后升级为定量规律**:GPTQ 消除 RTN 缺口的比例随粒度变粗/bit 变低**单调递增**:g64 52.9% → g128 57.7% → g256 67.4% → per-channel 75.6% → INT3 84.0%。RTN 逐组无补偿,粒度一粗/bit 一低就撑不住(per-channel +12.64、INT3 +51.45);GPTQ 用 Hinv 把误差摊到后续列,越是恶劣条件补偿的相对收益越高。这条单调性是本次扫描最硬的结论。
+4. **拐点与边界**:精度最优 GPTQ g64(+0.89@2.09x);性价比拐点 GPTQ g128(+1.19@2.14x,降 g64 仅多省 0.3 PPL 却掉 0.05x 压缩,边际薄);**per-channel 对谁都不划算**——压缩比只从 g256 的 2.16x 微升到 2.18x(等效 bit 差 0.11),GPTQ 却从 +1.51 恶化到 +3.08,纯亏精度不换体积;INT3 同理不划算(GPTQ +8.24,压缩仅 2.37x)。**根因一致:压缩比被 embedding 地板锁死,粒度/bit 再压只掉精度不省体积——要破 ~2.4x 必须动 embedding,不是降 bit 或粗化 group。**
 
-**结论 & 下一步**:M1 验收表粒度维完成,GPTQ g128 定为默认推荐。遗留:①GPTQ/AWQ 的 per-channel 缺失,恰是 RTN 崩溃处,补跑可验证 GPTQ 鲁棒性边界并可能给出 >2.16x 的可用点;②embedding 量化消融(唯一能破 2.4x 的方向);③M1 收尾释放校准 Hessian 显存。
+**结论 & 下一步**:M1 验收表(4 粒度 × 3 方法 + INT3)全部实测完成,GPTQ g128 定为默认推荐,per-channel 确认为无用点(已收录仅供边界佐证)。核心权衡曲线闭合。遗留仅剩两项:①embedding 量化消融(唯一能破 2.4x 的方向);②M1 收尾释放校准 Hessian 显存。之后进入 M2 稀疏注意力。
+
+## [2026-07-22] M1-g — embedding 量化消融(代码落地,A100 实测待补)
+**背景 / 目标**:M1-f 确认压缩比被 embedding FP16 地板锁死在 ~2.14x;要命中项目原始 deliverable(3.5-4x)只能量化 embedding。本条记录消融的设计与实现,PPL 待 A100 补。
+
+**核心难点——权重绑定(tied embedding)**:Qwen2.5-0.5B 的 `embed_tokens.weight` 与 `lm_head.weight` 是同一张量。若只把 lm_head 从 skip 移除,`apply_quantization` 会给它建一个新 INT4 buffer,而 embed_tokens 仍指原 FP16 张量——**绑定被拆散,变成两个矩阵,体积不降反升**。正确做法:量化共享矩阵一次,embed/lm_head 都用同一份反量化权重(部署时仍只存一份)。
+
+**设计与实现**:
+1. `FakeQuantEmbedding`(`fake_embedding.py`):镜像 FakeQuantLinear,沿 embedding_dim 分组 RTN,forward 走 `F.embedding`。embedding 是查表、无激活,故只能 RTN(不做 GPTQ/AWQ)。
+2. `apply.py` `_quantize_embedding`:量化 embedding 一次得 w_dq;检测 `out.weight is emb.weight`,绑定时把 lm_head 也换成持有**同一 w_dq 对象**的 FakeQuantLinear(用 `dataclasses.replace(cfg, n_bits=embedding_bits)` 让其元数据记正确位宽)。
+3. `compression_report` 改为按 `id(weight)` 去重——绑定共享矩阵只计一次,否则体积算两遍。
+4. `config.py` 加 `quant_embedding` / `embedding_bits`(None 沿用 n_bits);配置 `qwen0.5b_gptq_int4_embint{8,4}.yaml`;`run_sweep.py` `EMB_GRID` 两点。
+
+**压缩账预估(linears 固定 GPTQ INT4 g128 = 181.5MB,embedding 259.6MB@FP16)**:
+| 配置 | embedding | 体积估算 | 压缩比 |
+| --- | --- | --- | --- |
+| 基线(M1-f 冠军) | FP16 | 441MB | 2.14x |
+| emb INT8 | 133.9MB | ~315MB | **~3.0x** |
+| emb INT4 | 69.0MB | ~250MB | **~3.76x** |
+
+**验证(CPU)**:单测 4 例过(round-trip、绑定量化后仍共享同一 buffer、压缩比提升、forward 有限);cpu_smoke step8 演示绑定保持 + 体积下降。
+
+**待验证 / 风险**:PPL 未测。风险点是 lm_head(输出投影)对量化比输入 embedding 敏感,而绑定使二者被迫同精度——emb INT4 的 PPL 代价可能明显。故设 INT8/INT4 两档:INT8 保守探路,INT4 冲压缩比。**下一步**:A100 跑两配置补 PPL,判断 3x+ 是否以可接受精度达成;若 INT4 掉太多,结论为"3x 可达(INT8)、3.76x 需接受较大精度损失"。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

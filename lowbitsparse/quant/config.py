@@ -26,6 +26,9 @@ class QuantConfig:
     # 校准参数(GPTQ / AWQ 用;RTN 忽略)
     calib_n_samples: int = 128  # 校准样本数(条)
     calib_seqlen: int = 512     # 每条序列长度(token)
+    # embedding 量化(消融用;默认关,即 embedding 保持 FP16 作为压缩地板)
+    quant_embedding: bool = False   # True 则量化输入 embedding(绑定时 lm_head 一并)
+    embedding_bits: int = None      # embedding 单独位宽;None 沿用 n_bits
 
     @classmethod
     def from_dict(cls, d: dict) -> "QuantConfig":

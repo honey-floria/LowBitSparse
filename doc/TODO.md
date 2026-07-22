@@ -127,9 +127,15 @@ LowBitSparse/
       遗留(转入下方,不阻塞 M1 核心结论):group_size 扫描曲线、embedding 量化消融、校准 Hessian 显存释放。
 - [x] group_size × bit 扫描实跑(INT4 g64/128/256 + RTN per-channel + INT3 g128,见 M1-f)
       结论:group 是纯精度旋钮(压缩比恒 ~2.1x);GPTQ 对粗粒度/低 bit 鲁棒性远超 RTN;拐点 GPTQ g128。
-- [ ] 补跑 GPTQ/AWQ per-channel(RTN 已崩 +12.64,验证 GPTQ 鲁棒性边界 + 可能的高压缩可用点)
-- [ ] embedding 量化消融:评估能否把整体压缩比推到 3x+ 及 PPL 代价(唯一能破 2.4x 的方向)
-- [ ] M1 收尾优化:量化后释放 `calib_stats`(H 每层 ~94.6MB×24≈2.3GB 常驻),降低显存占用
+- [x] 补跑 GPTQ/AWQ per-channel(见 M1-f 补充)
+      结论:GPTQ +3.08 / AWQ +6.32 / RTN +12.64;GPTQ 恢复比例随粒度变粗单调升至 75.6%;但 per-channel 纯亏精度不换体积(2.18x vs g256 2.16x),确认为无用点。
+- [~] embedding 量化消融:评估能否把整体压缩比推到 3x+ 及 PPL 代价(唯一能破 2.4x 的方向)
+      代码已落地:`FakeQuantEmbedding` + apply.py 绑定感知替换(embed/lm_head 共享 w_dq)+
+      compression_report 按 id 去重;config 加 `quant_embedding`/`embedding_bits`;
+      配置 `qwen0.5b_gptq_int4_embint{8,4}.yaml`;run_sweep `EMB_GRID`;单测 4 例过;cpu_smoke step8。
+      **待 A100 实跑**填 PPL:预估 emb INT8 ~3.0x、emb INT4 ~3.76x(见 OPTIMIZATION M1-g 设计)。
+- [x] M1 收尾优化:量化后释放 `calib_stats`(`free_calib_stats`,main.py/run_sweep.py 评测前调用;cpu_smoke step7 演示)
+      代码已落地并 CPU 验证;GPU 峰值应从 ~7187MB 回落到接近基线 4574MB,待下次 A100 跑确认。
 
 ### M2 — 稀疏注意力
 - [ ] 注意力 hook / 替换机制(不改原权重)

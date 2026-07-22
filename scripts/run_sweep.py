@@ -37,26 +37,40 @@ BASE_GRID = [
 ]
 
 
-def _exp_id(method, n_bits, group_size):
+# --- embedding 量化消融:linears 固定 GPTQ INT4 g128,只扫 embedding 位宽 ---
+# 单一变量隔离 embedding 对压缩比/PPL 的贡献,回答"能否破 2.4x"。
+EMB_GRID = [
+    # (method, n_bits, group_size, symmetric, embedding_bits)
+    ("gptq",  4,  128,  False,  8),   # embedding INT8(保守)
+    ("gptq",  4,  128,  False,  4),   # embedding INT4(激进,目标 ~3.76x)
+]
+
+
+def _exp_id(method, n_bits, group_size, embedding_bits=None):
     gs = "pc" if group_size == -1 else str(group_size)
-    return f"m1_{method}_int{n_bits}_g{gs}"
+    base = f"m1_{method}_int{n_bits}_g{gs}"
+    return base + (f"_embint{embedding_bits}" if embedding_bits else "")
 
 
-def run_one(base_cfg, method, n_bits, group_size, sym, smoke):
-    """跑单个 (method, bits, gs) 组合,返回成功/失败。"""
+def run_one(base_cfg, method, n_bits, group_size, sym, smoke,
+            embedding_bits=None):
+    """跑单个组合(可选量化 embedding),返回成功/失败。"""
     import copy
     from lowbitsparse.utils import get_logger, load_config, set_seed, save_results
     from lowbitsparse.models import load_model_and_tokenizer, model_size_report
     from lowbitsparse.quant import (
         QuantConfig, apply_quantization, compression_report,
-        target_linear_names, get_calib_inputs, collect_calib_stats)
+        target_linear_names, get_calib_inputs, collect_calib_stats,
+        free_calib_stats)
     import torch
 
     log = get_logger()
     cfg = copy.deepcopy(base_cfg)
     qcfg = QuantConfig(method=method, n_bits=n_bits, group_size=group_size,
-                       symmetric=sym, skip=("lm_head",))
-    exp = _exp_id(method, n_bits, group_size)
+                       symmetric=sym, skip=("lm_head",),
+                       quant_embedding=embedding_bits is not None,
+                       embedding_bits=embedding_bits)
+    exp = _exp_id(method, n_bits, group_size, embedding_bits)
     log.info("=== 开始 %s ===", exp)
 
     m = cfg.get("model", {})
@@ -74,6 +88,7 @@ def run_one(base_cfg, method, n_bits, group_size, sym, smoke):
         calib_stats = collect_calib_stats(model, calib_ids, names)
 
     model, n = apply_quantization(model, qcfg, calib_stats=calib_stats)
+    free_calib_stats(calib_stats)            # 评测前释放校准 Hessian,压低显存峰值
     comp = compression_report(model)
     comp["ratio"] = round(fp16["size_mb"] / comp["size_mb"], 3)
 
@@ -86,7 +101,8 @@ def run_one(base_cfg, method, n_bits, group_size, sym, smoke):
                               stride=ev.get("stride", 2048), max_samples=max_s)
 
     results = {"config": {"method": method, "n_bits": n_bits,
-                          "group_size": group_size},
+                          "group_size": group_size,
+                          "embedding_bits": embedding_bits},
                "size_fp16": fp16, "compression": comp, "ppl": ppl}
     save_results(results, cfg.get("out_dir", "results"), exp)
     log.info("=== 完成 %s: PPL=%.4f, ratio=%.2fx ===",
@@ -115,7 +131,19 @@ def main():
             fail += 1
             log.error("组合 %s 失败:\n%s",
                       _exp_id(method, n_bits, gs), traceback.format_exc())
-    log.info("扫描结束:成功 %d, 失败 %d(共 %d 组)", ok, fail, len(BASE_GRID))
+    # embedding 量化消融(linears 固定 GPTQ INT4 g128,只变 embedding 位宽)
+    for method, n_bits, gs, sym, e_bits in EMB_GRID:
+        try:
+            run_one(base_cfg, method, n_bits, gs, sym, args.smoke,
+                    embedding_bits=e_bits)
+            ok += 1
+        except Exception:
+            fail += 1
+            log.error("组合 %s 失败:\n%s",
+                      _exp_id(method, n_bits, gs, e_bits),
+                      traceback.format_exc())
+    total = len(BASE_GRID) + len(EMB_GRID)
+    log.info("扫描结束:成功 %d, 失败 %d(共 %d 组)", ok, fail, total)
 
 
 if __name__ == "__main__":

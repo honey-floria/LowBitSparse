@@ -17,7 +17,7 @@ import torch.nn as nn
 from lowbitsparse.quant import (
     QuantConfig, apply_quantization, compression_report, FakeQuantLinear,
     gptq_quantize_weight, awq_quantize_weight,
-    collect_calib_stats, target_linear_names)
+    collect_calib_stats, target_linear_names, free_calib_stats)
 from lowbitsparse.quant.rtn import rtn_quantize_weight
 from lowbitsparse.quant.primitives import fake_quant_groupwise
 
@@ -136,6 +136,63 @@ def step6_group_sweep():
         print(f"  {tag:>12}: 相对误差 = {rel:.4%}")
 
 
+class TiedTinyLM(nn.Module):
+    """迷你 LM,lm_head 与 embed_tokens 绑定(模拟 Qwen2.5-0.5B 的 tied embedding)。"""
+
+    def __init__(self, vocab=1000, d=256):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(vocab, d)
+        self.proj = nn.Linear(d, d)
+        self.lm_head = nn.Linear(d, vocab, bias=False)
+        self.lm_head.weight = self.embed_tokens.weight   # 绑定:同一张量
+
+    def get_input_embeddings(self):
+        return self.embed_tokens
+
+    def set_input_embeddings(self, m):
+        self.embed_tokens = m
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def forward(self, ids):
+        return self.lm_head(self.proj(self.embed_tokens(ids)))
+
+
+def step8_embedding_quant():
+    """步骤8:embedding 量化消融——绑定权重量化一次,embed/lm_head 共享,压缩比升。
+
+    演示突破"embedding FP16 地板":真实 0.5B 上 embedding 占量化后体积 ~42%,
+    量化它是唯一能把压缩比从 ~2.1x 推到 3x+ 的方向。绑定检测确保不拆散共享矩阵。
+    """
+    from lowbitsparse.quant import FakeQuantEmbedding
+
+    print("\n[步骤8] embedding 量化消融(绑定权重,embed/lm_head 共享)")
+    torch.manual_seed(4)
+    ids = torch.randint(0, 1000, (2, 16))
+
+    # 基线:只量化 Linear,embedding 保持 FP16(skip lm_head)
+    m0 = TiedTinyLM()
+    apply_quantization(m0, QuantConfig(n_bits=4, group_size=128, skip=("lm_head",)))
+    r0 = compression_report(m0)
+
+    # 消融:量化 embedding INT8(绑定的 lm_head 一并,共享同一反量化权重)
+    m1 = TiedTinyLM()
+    apply_quantization(m1, QuantConfig(n_bits=4, group_size=128, skip=("lm_head",),
+                                       quant_embedding=True, embedding_bits=8))
+    r1 = compression_report(m1)
+
+    shared = m1.embed_tokens.weight is m1.lm_head.weight
+    print(f"  基线(emb FP16):  等效 {r0['effective_bits']} bit, 体积 {r0['size_mb']} MB")
+    print(f"  消融(emb INT8):  等效 {r1['effective_bits']} bit, 体积 {r1['size_mb']} MB")
+    print(f"  embed 类型: {type(m1.embed_tokens).__name__}, "
+          f"lm_head 类型: {type(m1.lm_head).__name__}")
+    print(f"  绑定保持(embed.weight is lm_head.weight): {shared}")
+    out = m1(ids)
+    print(f"  量化后 forward 输出 shape: {tuple(out.shape)}, 数值有限: "
+          f"{bool(torch.isfinite(out).all())}")
+
+
 def step7_calib_pipeline():
     """步骤7:端到端校准流水线(GPTQ/AWQ 真实代码路径,非仅数学函数)。
 
@@ -171,6 +228,10 @@ def step7_calib_pipeline():
         a = stats["down_proj"]["act_scales"]
         print(f"       down_proj: H{tuple(h.shape)} act{tuple(a.shape)} "
               f"-> {type(model.down_proj).__name__}")
+        # 4) 量化后释放校准统计:H 占显存大头,评测前清掉压低峰值。
+        freed = free_calib_stats(stats)
+        print(f"       释放校准统计 {freed} MB(真实 0.5B 上每层 H 可达 ~95MB,"
+              f"累计数 GB);清空后 stats 层数={len(stats)}")
 
 
 if __name__ == "__main__":
@@ -184,5 +245,6 @@ if __name__ == "__main__":
     step5_awq_vs_rtn()
     step6_group_sweep()
     step7_calib_pipeline()
-    print("\n[OK] 全部跑通 —— RTN/GPTQ/AWQ 数学与校准流水线、"
-          "就地替换、压缩统计、group 扫描。")
+    step8_embedding_quant()
+    print("\n[OK] 全部跑通 —— RTN/GPTQ/AWQ 数学与校准流水线、就地替换、"
+          "压缩统计、group 扫描、embedding 量化消融。")
