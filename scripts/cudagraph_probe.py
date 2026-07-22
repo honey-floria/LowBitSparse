@@ -69,11 +69,19 @@ def main():
     _stage("1. build StaticCache")
     try:
         from transformers import StaticCache
-        max_len = args.prefill + args.decode + 1
+        # 关键:StaticCache 有个随每次 forward 自增的内部计数器(cumulative_length),
+        # 会被烘焙进 CUDA graph。盲目 replay 同一张图会让它单调累加,约 max_cache_len
+        # 次后 index_copy_ 越界触发 device-assert(上次 STAGE6 崩因)。device-assert 无法
+        # try/except 兜住(已污染 context),只能预防:把 cache 放大到覆盖整个探针期间的
+        # 总写入次数(prefill + 所有 replay),测速期间就不会溢出。这只是探针用的规避;
+        # 真正的 ring-buffer M2-e 必须让写入位置回绕,不依赖单调自增。
+        total_decode_calls = (args.warmup + args.repeats) * args.decode
+        max_len = args.prefill + total_decode_calls + args.decode + 64  # 充足余量
         cache = StaticCache(config=model.config, max_batch_size=1,
                             max_cache_len=max_len, device=device, dtype=dtype)
         _sync()
-        print(f"  OK max_cache_len={max_len}")
+        print(f"  OK max_cache_len={max_len} (prefill={args.prefill} + "
+              f"~{total_decode_calls} replays + slack)")
     except Exception as e:  # noqa: BLE001
         print(f"  [FAIL @STAGE1] {e!r}")
         return
