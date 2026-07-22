@@ -1,7 +1,7 @@
 {
   "exp_id": "m0_fp16_baseline",
   "env": {
-    "timestamp": "2026-07-21T05:19:38.014934+00:00",
+    "timestamp": "2026-07-22T01:38:01.287910+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
@@ -40,8 +40,8 @@
   "latency": {
     "prefill_len": 512,
     "decode_tokens": 128,
-    "prefill_ms_median": 30.42,
-    "decode_tps_median": 37.19
+    "prefill_ms_median": 29.459,
+    "decode_tps_median": 37.71
   },
   "memory": {
     "peak_mb": 4574.341,

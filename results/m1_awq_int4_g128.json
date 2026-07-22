@@ -1,13 +1,13 @@
 {
-  "exp_id": "m1_rtn_int8_g128",
+  "exp_id": "m1_awq_int4_g128",
   "env": {
-    "timestamp": "2026-07-22T01:38:45.528794+00:00",
+    "timestamp": "2026-07-22T01:42:19.357659+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
   },
   "config": {
-    "exp_id": "m1_rtn_int8_g128",
+    "exp_id": "m1_awq_int4_g128",
     "seed": 42,
     "out_dir": "results",
     "model": {
@@ -16,13 +16,15 @@
       "device": "cuda"
     },
     "quant": {
-      "method": "rtn",
-      "n_bits": 8,
+      "method": "awq",
+      "n_bits": 4,
       "group_size": 128,
       "symmetric": false,
       "skip": [
         "lm_head"
-      ]
+      ],
+      "calib_n_samples": 128,
+      "calib_seqlen": 512
     },
     "eval": {
       "seqlen": 2048,
@@ -42,12 +44,12 @@
   },
   "compression": {
     "quant_weights": 357826560,
-    "effective_bits": 8.251,
-    "size_mb": 611.707,
-    "ratio": 1.54
+    "effective_bits": 4.251,
+    "size_mb": 441.082,
+    "ratio": 2.136
   },
   "ppl": {
-    "ppl": 14.2326,
+    "ppl": 16.3182,
     "seqlen": 2048,
     "stride": 2048,
     "n_tokens": 299078
@@ -55,11 +57,11 @@
   "latency": {
     "prefill_len": 512,
     "decode_tokens": 128,
-    "prefill_ms_median": 29.874,
-    "decode_tps_median": 37.65
+    "prefill_ms_median": 29.882,
+    "decode_tps_median": 37.22
   },
   "memory": {
-    "peak_mb": 4573.091,
-    "current_mb": 958.042
+    "peak_mb": 7187.153,
+    "current_mb": 3571.604
   }
 }
