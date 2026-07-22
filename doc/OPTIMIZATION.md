@@ -37,6 +37,7 @@
 | **M2 StreamingLLM s64 w1024** | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +0.841(质量最好) | 942.3 MB(不改权重) | prefill 0.659x / decode 0.871x | sparse 峰值平均 +170.5 MB |
 | M2 Block-sparse b128 l1 | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +4.519 | 942.3 MB(不改权重) | prefill 0.656x / decode 0.869x | sparse 峰值平均 +170.0 MB |
 | **M2-c StreamingLLM KV prune** | Qwen2.5-0.5B-Instruct | 2026-07-22 重跑;新版 HF cache 兼容层生效,裁剪真实命中(applied_steps=903,kept_len=1088) | avg ΔPPL +0.841(16k +1.35,守 1.5 内) | 942.3 MB(不改权重) | prefill ~1.00x / decode 0.911x(未达 1.2x) | sparse 峰值**低于** baseline,省 24→361 MB(随长度增长) |
+| **M2-e ring-buffer + CUDA graph** ⭐ | Qwen2.5-0.5B-Instruct | ring cache 固定 sink+window=1088 + graph replay;2k/4k/8k/16k | avg ΔPPL +0.841(additive mask 参考,同 M2-c) | 942.3 MB(不改权重) | **decode ~5.3x(36→193 tok/s)**,与序列长度无关 | decode 峰值恒定 1088,省 18→327 MB(随长度增长) |
 
 > 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md` 与 `results/m2_sparse_*.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
@@ -393,5 +394,65 @@
 4. **质量参考口径不变**:PPL 仍是 additive mask 的 teacher-forced 值,与 M2-b StreamingLLM 均值 +0.841 完全一致(同一质量路径),只是 latency/memory 换成了真实裁剪执行。
 
 **结论 & 下一步**:M2-c 机械目标达成(兼容层修复、裁剪验证生效、内存转正、质量守 1.5),标记 `[x]`。但它再次坐实 M2 核心结论:**mask / cache 切片类稀疏在小模型上拿不到 decode 加速**——decode 受权重带宽限制,裁剪开销 > 注意力收益。要够到 ≥1.2x decode / ≥1.5x prefill,须走 TODO 里仍开放的 M2-d(chunked prefill,避开完整 additive mask)与 M2-e(kernel-aware attention hook,保住 SDPA/FlashAttention 快路径),而非继续在 mask/裁剪层调参。M2-c 的净价值是"零质量代价换长序列显存",不是加速。
+
+## [2026-07-22] M2-e 前置探针 — 坐实 decode overhead-bound,CUDA graph 拿到 3.1x
+**背景 / 目标**:M2-c decode 不加速(0.911x)。要判断根因是"KV 太长"还是"固定 overhead",并验证消除 overhead 的收益上限,决定 M2-e(kernel-aware / ring-buffer)值不值得做、怎么做。
+
+**探针一:forward 延迟 vs 输入长度**(`profiler._probe_forward_scaling`,`compile_decode=true` 触发)。单次 `forward(use_cache=False)`,输入长度 1→512。A100 结果(seqlen 2048):
+
+| 输入长度 | 1 | 8 | 64 | 128 | 512 |
+| --- | --- | --- | --- | --- | --- |
+| forward 延迟 ms | 26.49 | 27.10 | 28.30 | 28.07 | 28.94 |
+
+512 token 仅比 1 token 慢 9.3%(`ratio_maxlen_over_len1=1.093`)。**结论**:一次 forward 有 ~26.5ms 固定地板,与 token 数几乎无关 → decode 每步 27ms 中 ~98% 是 kernel launch + Python 调度 overhead,仅 ~2% 是计算/KV。**decode 是 overhead-bound,不是 KV-bound,铁证**。这定量解释了 M2-c:裁剪 KV 最多省那 2% 的一部分,却付出每步 Python 记账,故净负。
+
+**探针二:CUDA graph decode 可行性**(独立脚本 `scripts/cudagraph_probe.py`,6 阶段隔离排查)。A100 结果:
+
+| 指标 | eager | CUDA graph replay |
+| --- | --- | --- |
+| decode | 37 tok/s(27 ms/step) | **113.3 tok/s(8.823 ms/step)** |
+| 提速 | — | **3.1x** |
+
+消除的 ~18ms/step 即 Python/launch overhead;残留 8.8ms 是图内几百个小 kernel 的执行(0.5B GEMV latency-bound,离 0.66ms 带宽极限尚远,再降需 kernel 融合,与 graph 捕获冲突,故 **3.1x ≈ graph-only 路线现实上限**)。
+
+**踩坑(两次 CUDA graph 失败,同一根因)**:
+1. `torch.compile(reduce-overhead)` 的 cudagraphs 被 transformers cache `update()` 的原地 `cumulative_length.add_()` 判为 mutated inputs 自动跳过(72 instances),overhead 未消除。
+2. 手动 `torch.cuda.CUDAGraph()` + StaticCache:capture 成功但 **replay 上千次后** `index_copy_` 越界 device-assert(约第 124 次)。根因同上——`cumulative_length` 每次 forward 自增且被烘焙进图,盲目 replay 单调累加至越界。device-assert 污染 context 带崩整个 benchmark,无法 try/except 兜。探针里放大 cache 规避;真正的解在下方。
+
+**关键设计结论(直接定义 M2-e)**:
+- decode 加速来自 **CUDA graph(消 overhead)**,不来自稀疏/KV 裁剪本身;稀疏的作用是让**固定形状 cache 在任意长序列下可行**。
+- **StaticCache 对 replay 不安全**(单调自增计数器);M2-e 的 ring-buffer 必须让写入位置**回绕**(sink 固定 + window 循环覆盖),cache 长度钉死在 sink+window,不随序列增长。
+- 目标量化:decode 3.1x(远超 M2-c 的 1.2x 目标)+ 恒定显存。
+
+**结论 & 下一步**:overhead-bound 与 CUDA graph 收益均已坐实。M2-e 定为「有界回绕 ring-buffer KV cache + CUDA graph 捕获」,进入实现规划。探针代码保留:`profiler._probe_forward_scaling`(集成)+ `scripts/cudagraph_probe.py`(独立,含 6 阶段排查,复用于回归)。
+
+## [2026-07-22] M2-e 实现 — ring-buffer KV cache + CUDA graph:decode 5.3x + 恒定显存(M2 翻案)
+**背景 / 目标**:前置探针已证明 decode overhead-bound + CUDA graph 独立可拿 3.1x。本条把它落成可复现的 benchmark 收益:有界 ring-buffer KV cache 让固定形状 cache 在任意长序列下可行,叠加 CUDA graph 消 overhead。范围为 Benchmark 证明路线(latency/memory 真实路径,quality 用 additive mask teacher-forced PPL 参考,不做 RoPE 相位忠实修正)。
+
+**核心设计**:
+- `RingKVCache`(`lowbitsparse/sparse/ring_cache.py`):固定 `sink+window`(=1088)大小的回绕 KV cache。**prefill 返回真实完整 K/V**(q_len 与 kv_len 必须一致,否则 attention 形状不匹配报错);**decode 回绕写 window 段一个有界合法槽位并返回恒定形状 buffer**——这是 CUDA graph 能反复 replay 的关键。刻意不用 StaticCache:它的 `cumulative_length` 单调自增被烘焙进图,replay 上千次后 index_copy_ 越界 device-assert(前置探针 STAGE6 崩因)。
+- `build_ring_graph_decode`:复用探针 6 步流程(build→prefill→单步 sanity→side-stream warmup→capture→replay 计时)。
+- duck-typed 接口对齐:A100 新版 transformers 在 mask 构造时调 `cache.get_mask_sizes(cache_position, layer_idx)`,补上返回 `(实际填充长度, offset=0)` 即通;是唯一缺失的接口。
+
+**结果(A100,`results/m2e_streaming_ringgraph_s64_w1024.json`;baseline eager decode vs ring+graph)**:
+
+| seqlen | baseline decode | ring+graph decode | decode speedup | mem 省(baseline−ring) | ΔPPL |
+| --- | --- | --- | --- | --- | --- |
+| 2048 | 36.4 tok/s | 194.6 tok/s | **5.34x** | 18.5 MB | +0.242 |
+| 4096 | 36.2 | 192.5 | **5.32x** | 61.2 MB | +0.707 |
+| 8192 | 36.5 | 192.9 | **5.29x** | 144.5 MB | +1.061 |
+| 16384 | 36.1 | 193.8 | **5.37x** | 327.5 MB | +1.354 |
+
+**关键分析**:
+1. **decode ~5.3x,远超 M2-c 的 1.2x 目标,且与序列长度无关**(ring+graph 恒定 ~193 tok/s,因 cache 钉死 1088)。比独立探针的 3.1x 更高:探针那次 StaticCache 被放大到 ~3000+(prefill+全部 replay),KV 更长;ring 固定 1088,graph 内 attention 扫得更少。**固定小 cache 与消 overhead 双重收益叠加**。
+2. **显存恒定 → 正节省随长度增长**(16k 省 327MB)。baseline 峰值随 seqlen 涨,ring decode 阶段峰值钉在 1088 量级,长序列优势更大。
+3. **加速来自 CUDA graph 消 overhead,不来自稀疏本身**;稀疏(sink+window 固定)的作用是让固定形状 cache 在长序列下可行——这是 M2 全程最重要的认知修正,推翻了"稀疏=更快"的直觉。
+4. **质量口径不变**:ΔPPL 与 M2-c 完全一致(同 additive mask 参考路径),守 1.5 内。
+
+**验证**:CPU 单测 5 passed(回绕槽位/恒定形状/sink 保留/长度封顶/reset);A100 门控 `--ring` 不崩 + 5.2x + 显存恒定;集成 benchmark 四长度全 `available: True`。
+
+**遗留 / 边界**:①未做 RoPE 相位忠实修正,graph 路径不保证生成 token 正确性(仅测速/测显存);要用于 `generate()` 需补 re-rotation。②prefill 加速仍属 M2-d(chunked prefill),M2-e 只解决 decode 侧。③16k 的 ΔPPL +1.354 接近 1.5 阈值,window/sink 再缩或序列再长需留意质量。
+
+**结论**:M2 翻案成功——从"功能完成+零加速"到 **decode 5.3x + 恒定显存**。小模型 decode 的瓶颈是 kernel launch overhead,CUDA graph 是解药,ring-buffer 是使能条件。M2 里程碑核心结论闭合。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

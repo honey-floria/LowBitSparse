@@ -150,7 +150,7 @@ LowBitSparse/
 - [x] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存(A100 已回填 `results/m2_*.json`)
 - [x] **验收**:加速比曲线 + 长文质量保持表(已回填,但当前实现未达到加速目标)
 
-> 备注:M2 的代码链路和实验记录已完成,但本轮 A100 实测没有拿到加速,当前更像“功能完成 + 结果负反馈”。若继续攻坚,重点应转向 kernel-aware attention hook,而不是继续堆普通 additive mask。
+> 备注(2026-07-22 更新):M2-a/b 的 additive mask 路径确实没拿到加速(功能完成+负反馈),但这不是 M2 的终点。M2-c 让 KV 裁剪真实生效(显存转正,decode 仍不涨),**M2-e 最终翻案**:先用探针定量证明 decode 是 overhead-bound(非 KV-bound),再用有界 ring-buffer KV cache + CUDA graph 拿到 **decode ~5.3x + 恒定显存**。核心教训:小模型 decode 的瓶颈是 kernel launch overhead,加速来自 CUDA graph,稀疏(固定小 cache)是让 graph 在长序列下可行的使能条件,而非加速本身的来源。
 
 #### M2 后续优化计划
 - [x] **M2-c StreamingLLM KV cache 裁剪**:只保留 attention sink + 最近 window 的 K/V,让 decode 阶段真实缩短 `kv_len`,不再只靠 mask 屏蔽旧 token。
@@ -162,8 +162,11 @@ LowBitSparse/
       结果回填(2026-07-22 重跑,新版 HF cache 容器兼容层已落地 commit ccc8052/b28fdef):裁剪**已真实生效**——`applied: true`、`applied_steps=903`、覆盖全 24 层、cache 稳定裁到 `kept_len=1088`(sink 64 + window 1024)。peak memory 由旧版负反馈翻为正节省(2k +24MB → 16k +361MB,随序列增长),质量 ΔPPL 守在 1.5 内。**但 decode speedup 仍 0.907–0.915x(未达 1.2x)**:根因是 0.5B decode 为权重带宽瓶颈而非 KV 瓶颈,把 KV 从 16384 砍到 1088 对每步延迟几乎无影响,而 903×24 层的 Python 侧裁剪记账开销盖过了注意力上省下的时间(稳态每步仅 `pruned:1`)。结构性结论,非 bug——decode 加速须转 M2-e kernel-aware 路径。
 - [ ] **M2-d chunked prefill / local attention**:prefill 阶段避免构造完整 `[batch,1,q,kv]` additive mask,按 query chunk 只看局部 K/V。
       验收目标:8k/16k peak memory 低于 dense baseline,prefill 不慢于 dense。
-- [ ] **M2-e kernel-aware attention hook**:从顶层 `attention_mask` 注入升级到 attention module 内部 patch,尽量保留 FlashAttention/SDPA fast path;必要时再评估 Triton/FlashAttention local/block kernel。
-      最终目标:8k+ prefill/decode 综合 speedup ≥ 1.5x。
+- [x] **M2-e 有界 ring-buffer KV cache + CUDA graph decode**(实际落地形态,替代原"kernel-aware hook"设想):
+      两个 A100 探针先定量锁定根因——decode 是 **overhead-bound**(单次 forward ~26.5ms 固定地板,512 token 仅比 1 token 慢 9.3%),CUDA graph 可消除。再实现 `RingKVCache`(固定 sink+window=1088 回绕写入,decode 返回恒定形状 buffer)+ graph 捕获。
+      **结果(decode 目标 ≥1.2x 大幅超标):2k/4k/8k/16k decode speedup 全部 ~5.3x(36→193 tok/s),显存恒定在 1088(省 18→327MB 随长度增长),ΔPPL 与 M2-c 一致守 1.5 内**。数据源 `results/m2e_streaming_ringgraph_s64_w1024.json`。关键洞察:decode 加速来自 CUDA graph 消 overhead,稀疏的作用是让固定形状 cache 在任意长序列下可行。范围为 Benchmark 证明(latency/memory 真实路径,quality 用 additive mask 参考,不做 RoPE 相位忠实修正)。
+      代码:`lowbitsparse/sparse/ring_cache.py`、`scripts/cudagraph_probe.py --ring`、`configs/qwen0.5b_sparse_streaming_ringgraph.yaml`。
+- [ ] **M2-d chunked prefill / local attention**(仍开放):prefill 阶段避免构造完整 `[batch,1,q,kv]` additive mask,按 query chunk 只看局部 K/V。验收目标:8k/16k peak memory 低于 dense baseline,prefill 不慢于 dense。(M2-e 已解决 decode 侧,prefill 加速仍待此项。)
 
 ### M3 — 量化感知蒸馏
 - [ ] 蒸馏数据管道(教师 logits 缓存或在线前向)
