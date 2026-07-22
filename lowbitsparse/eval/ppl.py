@@ -5,7 +5,12 @@
 PPL 是本项目衡量压缩(量化/稀疏)对语言建模能力损伤的核心精度指标。
 """
 import torch
-from tqdm import tqdm   # 进度条,长序列评测耗时可见
+
+try:
+    from tqdm import tqdm   # 进度条,长序列评测耗时可见
+except ImportError:  # pragma: no cover - 轻量环境无 tqdm 时退化为普通迭代器
+    def tqdm(iterable, **kwargs):
+        return iterable
 
 
 @torch.no_grad()        # 纯评测:禁用梯度,省显存、提速

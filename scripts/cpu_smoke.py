@@ -20,6 +20,9 @@ from lowbitsparse.quant import (
     collect_calib_stats, target_linear_names, free_calib_stats)
 from lowbitsparse.quant.rtn import rtn_quantize_weight
 from lowbitsparse.quant.primitives import fake_quant_groupwise
+from lowbitsparse.sparse import (
+    SparseConfig, build_sparse_attention_mask, install_sparse_attention,
+    sparse_density)
 
 
 class TinyLM(nn.Module):
@@ -166,6 +169,58 @@ class TiedTinyLM(nn.Module):
         return self.lm_head(self.proj(self.embed_tokens(ids)))
 
 
+class TinySelfAttention(nn.Module):
+    """最小可运行自注意力,用于稀疏 mask 冒烟。"""
+
+    def __init__(self, d=128, n_heads=4):
+        super().__init__()
+        self.d = d
+        self.n_heads = n_heads
+        self.head_dim = d // n_heads
+        self.q_proj = nn.Linear(d, d)
+        self.k_proj = nn.Linear(d, d)
+        self.v_proj = nn.Linear(d, d)
+        self.o_proj = nn.Linear(d, d)
+
+    def forward(self, hidden_states, attention_mask=None):
+        bsz, seq_len, _ = hidden_states.shape
+        q = self.q_proj(hidden_states).view(bsz, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(hidden_states).view(bsz, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(hidden_states).view(bsz, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        if attention_mask is not None:
+            scores = scores + attention_mask
+        probs = torch.softmax(scores, dim=-1)
+        out = torch.matmul(probs, v).transpose(1, 2).reshape(bsz, seq_len, self.d)
+        return self.o_proj(out)
+
+
+class TinySparseLM(nn.Module):
+    """带 `_update_causal_mask` 的最小 causal LM,用于 hook 冒烟。"""
+
+    def __init__(self, d=128, vocab=256, n_heads=4):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(vocab, d)
+        self.attn = TinySelfAttention(d=d, n_heads=n_heads)
+        self.lm_head = nn.Linear(d, vocab, bias=False)
+
+    def _update_causal_mask(self, attention_mask, inputs_embeds,
+                            cache_position=None, past_key_values=None,
+                            output_attentions=False):
+        q_len = inputs_embeds.shape[1]
+        device = inputs_embeds.device
+        dtype = inputs_embeds.dtype
+        mask = torch.zeros((1, 1, q_len, q_len), device=device, dtype=dtype)
+        future = torch.triu(torch.ones(q_len, q_len, device=device, dtype=torch.bool), diagonal=1)
+        return mask.masked_fill(future.unsqueeze(0).unsqueeze(0), torch.finfo(dtype).min)
+
+    def forward(self, ids):
+        x = self.embed_tokens(ids)
+        mask = self._update_causal_mask(None, x)
+        x = self.attn(x, attention_mask=mask)
+        return self.lm_head(x)
+
+
 def step8_embedding_quant():
     """步骤8:embedding 量化消融——绑定权重量化一次,embed/lm_head 共享,压缩比升。
 
@@ -237,8 +292,35 @@ def step7_calib_pipeline():
               f"-> {type(model.down_proj).__name__}")
         # 4) 量化后释放校准统计:H 占显存大头,评测前清掉压低峰值。
         freed = free_calib_stats(stats)
-        print(f"       释放校准统计 {freed} MB(真实 0.5B 上每层 H 可达 ~95MB,"
+        print(f"       释放校准统计 {freed} MB(真实 0.5B 上每层 H 可达 ~95MB," 
               f"累计数 GB);清空后 stats 层数={len(stats)}")
+
+
+def step9_sparse_attention():
+    """步骤9:稀疏注意力 mask / hook 演示。"""
+    print("\n[步骤9] 稀疏注意力(mask + hook) vs 全因果")
+    torch.manual_seed(5)
+    ids = torch.randint(0, 256, (2, 8))
+
+    base = TinySparseLM()
+    y_full = base(ids).detach()
+
+    modes = [
+        ("sliding_window", SparseConfig(mode="sliding_window", window_size=4)),
+        ("streaming_llm", SparseConfig(mode="streaming_llm", window_size=4, sink_size=2)),
+        ("block_sparse", SparseConfig(mode="block_sparse", sink_size=0, block_size=2, block_lookback=1)),
+    ]
+    for name, cfg in modes:
+        density = sparse_density(8, 8, cfg)
+        mask = build_sparse_attention_mask(8, 8, cfg, dtype=torch.float32)
+        model = TinySparseLM()
+        model.load_state_dict(base.state_dict())
+        patch = install_sparse_attention(model, cfg)
+        y_sparse = model(ids).detach()
+        patch.restore()
+        diff = (y_full - y_sparse).norm().item() / y_full.norm().item()
+        print(f"  {name:>14}: density={density['density']:.3f}, sparsity={density['sparsity']:.3f}, "
+              f"mask shape={tuple(mask.shape)}, 输出差异={diff:.4%}")
 
 
 if __name__ == "__main__":
@@ -253,5 +335,6 @@ if __name__ == "__main__":
     step6_group_sweep()
     step7_calib_pipeline()
     step8_embedding_quant()
+    step9_sparse_attention()
     print("\n[OK] 全部跑通 —— RTN/GPTQ/AWQ 数学与校准流水线、就地替换、"
-          "压缩统计、group 扫描、embedding 量化消融。")
+          "压缩统计、group 扫描、embedding 量化消融、稀疏注意力 mask/hook。")

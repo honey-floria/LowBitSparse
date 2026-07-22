@@ -1,8 +1,9 @@
 """LowBitSparse 命令行入口。
 
 已实现命令:
-    python main.py eval  --config configs/qwen0.5b_base.yaml
-    python main.py quant --config configs/qwen0.5b_int4.yaml
+    python main.py eval   --config configs/qwen0.5b_base.yaml
+    python main.py quant  --config configs/qwen0.5b_int4.yaml
+    python main.py sparse --config configs/qwen0.5b_sparse_sliding.yaml
 
 torch、transformers、datasets 等重依赖延迟到子命令内部导入,
 保证本文件在 CPU-only 环境和轻量测试中仍可导入。
@@ -56,6 +57,21 @@ def _evaluate(model, tok, cfg):
     log.info("prefill %.1fms, decode %.1f tok/s, peak %sMB",
              lat["prefill_ms_median"], lat["decode_tps_median"], mem["peak_mb"])
     return {"ppl": ppl, "latency": lat, "memory": mem}
+
+
+def _run_sparse(model, tok, cfg):
+    """M2:稀疏注意力长序列基准。"""
+    from lowbitsparse.sparse import SparseConfig
+    from lowbitsparse.sparse.benchmark import benchmark_sparse_attention
+
+    scfg = SparseConfig.from_dict(cfg.get("sparse", {}))
+    log.info("稀疏注意力配置: mode=%s, window=%d, sink=%d, block=%d",
+             scfg.mode, scfg.window_size, scfg.sink_size, scfg.block_size)
+    return benchmark_sparse_attention(
+        model, tok, scfg,
+        eval_cfg=cfg.get("eval", {}),
+        profile_cfg=cfg.get("profile", {}),
+    )
 
 
 def cmd_eval(args):
@@ -125,6 +141,23 @@ def cmd_quant(args):
     log.info("结果已保存: %s", path)
 
 
+def cmd_sparse(args):
+    """M2:稀疏注意力 baseline vs sparse 长序列基准。"""
+    from lowbitsparse.models import model_size_report
+
+    cfg = load_config(args.config) if args.config else {}
+    set_seed(cfg.get("seed", 42))
+    model, tok = _load(cfg)
+    size = model_size_report(model)
+    log.info("参数量 %.3fM, 体积 %.1fMB", size["params_millions"], size["size_mb"])
+    metrics = _run_sparse(model, tok, cfg)
+
+    results = {"config": cfg, "size": size, **metrics}
+    path = save_results(results, cfg.get("out_dir", "results"),
+                        cfg.get("exp_id", "m2_sparse_sliding"))
+    log.info("结果已保存: %s", path)
+
+
 def _todo(name):
     """为已注册但尚未实现的里程碑命令构造占位处理函数。"""
     def _fn(args):
@@ -145,11 +178,13 @@ def build_parser():
     pq.add_argument("--config", type=str, default="configs/qwen0.5b_int4.yaml")
     pq.set_defaults(func=cmd_quant)
 
-    # 后续里程碑先暴露在 --help 中;调用时明确报错,避免静默失败。
-    for name in ("sparse", "distill"):
-        sp = sub.add_parser(name, help=f"{name} (后续里程碑)")
-        sp.add_argument("--config", type=str, default=None)
-        sp.set_defaults(func=_todo(name))
+    ps = sub.add_parser("sparse", help="M2: 稀疏注意力长序列基准")
+    ps.add_argument("--config", type=str, default="configs/qwen0.5b_sparse_sliding.yaml")
+    ps.set_defaults(func=cmd_sparse)
+
+    sp = sub.add_parser("distill", help="M3: 量化感知蒸馏 (后续里程碑)")
+    sp.add_argument("--config", type=str, default=None)
+    sp.set_defaults(func=_todo("distill"))
     return p
 
 

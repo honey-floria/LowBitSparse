@@ -41,14 +41,17 @@
 ### 2.1 整体架构
 ```
 LowBitSparse/
-├── main.py                      # CLI 入口:eval/quant 已实现、sparse/distill 占位;量化+评测闭环
+├── main.py                      # CLI 入口:eval/quant/sparse 已实现、distill 占位;量化+评测闭环
 ├── configs/                     # YAML 实验配置
 │   ├── qwen0.5b_base.yaml       #   0.5B FP16 基线(M0)
 │   ├── qwen1.5b_base.yaml       #   1.5B FP16 基线
 │   ├── qwen0.5b_int8.yaml       #   RTN INT8(量化健全性检查)
 │   ├── qwen0.5b_int4.yaml       #   RTN INT4
 │   ├── qwen0.5b_gptq_int4.yaml  #   GPTQ INT4(含校准参数)
-│   └── qwen0.5b_awq_int4.yaml   #   AWQ INT4(含校准参数)
+│   ├── qwen0.5b_awq_int4.yaml   #   AWQ INT4(含校准参数)
+│   ├── qwen0.5b_sparse_sliding.yaml   #   Sliding Window M2
+│   ├── qwen0.5b_sparse_streaming.yaml #   StreamingLLM M2
+│   └── qwen0.5b_sparse_block.yaml     #   Block-sparse M2(可选)
 ├── lowbitsparse/
 │   ├── models/loader.py         # 模型/分词器加载(dtype/设备管理)、体积统计
 │   ├── quant/                   # 权重量化(M1 核心)
@@ -60,7 +63,7 @@ LowBitSparse/
 │   │   ├── calibration.py       #   校准数据采样 + hook 收集逐层 Hessian/激活统计
 │   │   ├── fake_linear.py       #   FakeQuantLinear:持有反量化权重,forward 走标准 matmul
 │   │   └── apply.py             #   遍历替换 Linear、按 method 路由、压缩比/等效 bit 统计
-│   ├── sparse/                  # 滑窗 / StreamingLLM / 块稀疏 注意力(M2,未落地)
+│   ├── sparse/                  # 滑窗 / StreamingLLM / 块稀疏 注意力(M2)
 │   ├── distill/                 # QAT 蒸馏训练循环(M3,未落地)
 │   ├── eval/                    # 评测
 │   │   ├── ppl.py               #   WikiText-2 strided PPL
@@ -140,12 +143,12 @@ LowBitSparse/
       A100 已确认:embint 跑日志显示释放 2607.9MB,peak 从 ~7187MB 回落到 4574MB(=基线),预测兑现。
 
 ### M2 — 稀疏注意力
-- [ ] 注意力 hook / 替换机制(不改原权重)
-- [ ] Sliding Window 实现 + 窗口大小扫描
-- [ ] StreamingLLM(sink + 窗口)实现
-- [ ] Block-sparse 实现(可选)
-- [ ] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存
-- [ ] **验收**:加速比曲线 + 长文质量保持表
+- [x] 注意力 hook / 替换机制(不改原权重)
+- [x] Sliding Window 实现 + 窗口大小扫描
+- [x] StreamingLLM(sink + 窗口)实现
+- [x] Block-sparse 实现(可选)
+- [~] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存(benchmark 命令已实现,待 A100 实测)
+- [~] **验收**:加速比曲线 + 长文质量保持表(待 A100 结果回填)
 
 ### M3 — 量化感知蒸馏
 - [ ] 蒸馏数据管道(教师 logits 缓存或在线前向)

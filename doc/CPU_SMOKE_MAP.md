@@ -231,6 +231,33 @@ AWQ 现为两阶段:①激活感知缩放搜索(保护大激活通道);②权重
 
 ---
 
+## 步骤9 — 稀疏注意力(mask + hook)
+
+**脚本输出**
+```
+[步骤9] 稀疏注意力(mask + hook) vs 全因果
+  sliding_window: density=0.406, sparsity=0.594, mask shape=(1, 1, 8, 8), 输出差异=34.4290%
+   streaming_llm: density=0.516, sparsity=0.484, mask shape=(1, 1, 8, 8), 输出差异=16.9285%
+    block_sparse: density=0.375, sparsity=0.625, mask shape=(1, 1, 8, 8), 输出差异=44.7427%
+```
+
+**脚本位置**:`scripts/cpu_smoke.py` `step9_sparse_attention()`
+
+**对应源码**
+
+| 输出/动作 | 源码 | 说明 |
+| --- | --- | --- |
+| 稀疏配置 | `sparse/config.py` `SparseConfig` | mode / window / sink / block_lookback / benchmark_lengths |
+| 可见性矩阵 | `sparse/masks.py` `sparse_visibility` | 先算 bool 可见性,便于单测边界 |
+| additive mask | `sparse/masks.py` `build_sparse_attention_mask` | 产出 [1,1,q,k] mask,供 HF causal mask 合并 |
+| hook / restore | `sparse/apply.py` `install_sparse_attention` | 用 `MethodType` 包 `_update_causal_mask`,不改原权重 |
+| density 统计 | `sparse/masks.py` `sparse_density` | 输出可见 token 比例,用于 benchmark 预览 |
+| 长序列基准入口 | `sparse/benchmark.py` `benchmark_sparse_attention` | 先 baseline 再 sparse,产出逐长度对照表 |
+
+> 真实 0.5B / Qwen2.5 的 2k/4k/8k/16k 曲线由 `main.py sparse` 触发,结果写入 `results/m2_*.json`。
+
+---
+
 ## 维护约定(重要)
 
 **每次新增/修改量化或压缩算法,必须同步更新 `scripts/cpu_smoke.py` 与本对照文件。**
@@ -240,4 +267,3 @@ AWQ 现为两阶段:①激活感知缩放搜索(保护大激活通道);②权重
 - 在本文件新增对应的"步骤N"小节,列出输出 → 源码位置映射。
 - 行号变动时更新表格;函数/类改名时同步。
 - 目的:让任何人在 CPU 上一条命令就能理解"当前项目实现了哪些算法、各自逻辑在哪"。
-

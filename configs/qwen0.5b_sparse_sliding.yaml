@@ -1,0 +1,25 @@
+# M2 配置:Qwen2.5-0.5B Sliding Window 稀疏注意力
+exp_id: m2_sparse_sliding_w1024
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+sparse:
+  mode: sliding_window
+  window_size: 1024
+  sink_size: 64
+  block_size: 128
+  block_lookback: 1
+  benchmark_lengths: [2048, 4096, 8192, 16384]
+
+eval:
+  max_samples: null
+
+profile:
+  decode_tokens: 128
+  warmup: 2
+  repeats: 5

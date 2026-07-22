@@ -229,6 +229,7 @@
 4. `config.py` 加 `quant_embedding` / `embedding_bits`(None 沿用 n_bits);配置 `qwen0.5b_gptq_int4_embint{8,4}.yaml`;`run_sweep.py` `EMB_GRID` 两点。
 
 **结果(A100 实测,linears 固定 GPTQ INT4 g128;数据源 `results/m1_gptq_int4_embint{8,4}.json`)**:
+
 | 配置 | embedding | PPL | ΔPPL(vs FP16) | 压缩比 | 体积 |
 | --- | --- | --- | --- | --- | --- |
 | 基线(M1-f 冠军) | FP16 | 15.4347 | +1.190 | 2.136x | 441MB |
@@ -252,6 +253,7 @@
 **实现(两阶段)**:`primitives.py` `find_qparams` 加 `clip` 系数、新增 `fake_quant_groupwise_autoclip`(逐组在 α∈[0.5,1] 网格取**权重量化 MSE** 最优);`awq.py` 阶段 2 在缩放后权重上跑 autoclip,末尾用加权 Frobenius 误差做保底比较。
 
 **A100 实测(裁剪 vs 无裁剪,同压缩比)**:
+
 | 配置 | 无裁剪 PPL | +裁剪 PPL | 变化 |
 | --- | --- | --- | --- |
 | AWQ INT4 g64 | 15.7071 | 16.0458 | +0.34 |
@@ -267,5 +269,30 @@
 **处理**:`clip_search` 默认改 `False`;裁剪代码保留在 flag 后并在 docstring 标注有害;cpu_smoke step5 改回缩放为主、裁剪标注为已知负结果;`results/m1_awq_*.json` 需用默认(裁剪关)重跑恢复无裁剪好值。
 
 **结论**:纯缩放 AWQ(已验证)仍是 AWQ 的正确形态,M1-f 的方法排序 GPTQ < AWQ < RTN **不变**。auto_clip 的正确实现方向是输出误差搜索,非权重空间代理。价值在于这条负结果本身:**低 bit 量化里"降权重 MSE"与"降 PPL"可以反向,离群权重不可牺牲。**
+
+## [2026-07-22] M2-a — 稀疏注意力代码落地与 smoke 验证
+**背景 / 目标**:把 M2 的稀疏注意力做成可替换、可 benchmark 的代码路径,先落地滑窗 / StreamingLLM / 块稀疏三种 mask 逻辑,再把长序列 2k/4k/8k/16k 的对照基准接上。
+
+**分析**:
+- 低风险的切入点不是重写整层 attention,而是挂在 HF causal LM 常见的 `_update_causal_mask` 上。这样不碰原权重、不碰 KV cache 数据结构,只改“看哪些 token”。
+- 稀疏与量化不同,核心不是数值近似而是可见性约束。单测重点应锁住窗口边界、sink 保留和 restore 行为,而不是模型分数本身。
+- 本地环境缺 `transformers/datasets/tqdm`,所以代码必须支持“导入不炸、需要时再失败或降级”。因此把 tqdm 改成可选,benchmark 逻辑按需导入。
+
+**方案**:
+- 新增 `lowbitsparse.sparse/{config,masks,apply,benchmark}.py`:
+  - `SparseConfig` 统一收口 `mode/window/sink/block_lookback/benchmark_lengths`。
+  - `build_sparse_attention_mask` 生成 additive mask;`sparse_visibility` 单独输出 bool 视图便于测试。
+  - `install_sparse_attention` 用 `MethodType` 包一层 `_update_causal_mask`,只做 mask 合并,不改权重。
+  - `benchmark_sparse_attention` 先 baseline 再 sparse,按 2k/4k/8k/16k 产出 PPL / prefill / decode / memory 对照。
+- 接入 `main.py sparse` 子命令与三份 YAML 示例配置。
+- `scripts/cpu_smoke.py` 增加 step9,用迷你 causal LM 验证 mask 形状、稀疏率与 hook 生效。
+
+**结果**:
+- `pytest tests/test_sparse.py -q` 4 passed。
+- `pytest tests/test_rtn.py tests/test_group_size.py tests/test_gptq.py tests/test_awq.py tests/test_embedding_quant.py -q` 20 passed。
+- `scripts/cpu_smoke.py` 全步骤通过,step9 显示 sliding / streaming / block sparse 的 density 与输出差异。
+- `main.py sparse`、`lowbitsparse.sparse`、`lowbitsparse.sparse.benchmark` 可正常导入;`tqdm` 在无安装时已降级。
+
+**结论 & 下一步**:M2 代码链路已打通,可以直接在 A100 + HF 环境上跑长序列 benchmark 并回填 `results/`。当前还缺的是实机数值,不是实现本身。
 
 <!-- 后续条目在此追加,遵循上方模板 -->
