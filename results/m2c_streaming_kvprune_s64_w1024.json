@@ -1,0 +1,302 @@
+{
+  "exp_id": "m2c_streaming_kvprune_s64_w1024",
+  "env": {
+    "timestamp": "2026-07-22T09:15:47.353005+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "exp_id": "m2c_streaming_kvprune_s64_w1024",
+    "seed": 42,
+    "out_dir": "results",
+    "model": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "sparse": {
+      "mode": "streaming_llm",
+      "window_size": 1024,
+      "sink_size": 64,
+      "block_size": 128,
+      "block_lookback": 1,
+      "cache_pruning": true,
+      "benchmark_lengths": [
+        2048,
+        4096,
+        8192,
+        16384
+      ]
+    },
+    "eval": {
+      "max_samples": null
+    },
+    "profile": {
+      "decode_tokens": 128,
+      "warmup": 2,
+      "repeats": 5,
+      "reset_peak_after_prefill": true
+    }
+  },
+  "size": {
+    "params": 494032768,
+    "params_millions": 494.033,
+    "bytes": 988065536,
+    "size_mb": 942.293
+  },
+  "sparse_config": {
+    "mode": "streaming_llm",
+    "window_size": 1024,
+    "sink_size": 64,
+    "block_size": 128,
+    "block_lookback": 1,
+    "cache_pruning": true,
+    "benchmark_lengths": [
+      2048,
+      4096,
+      8192,
+      16384
+    ]
+  },
+  "benchmark_kind": "streaming_kv_pruning",
+  "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;latency/memory 使用真实 KV cache 裁剪路径。",
+  "rows": [
+    {
+      "seqlen": 2048,
+      "baseline": {
+        "seqlen": 2048,
+        "ppl": {
+          "ppl": 14.2445,
+          "seqlen": 2048,
+          "stride": 2048,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 2048,
+          "decode_tokens": 128,
+          "prefill_ms_median": 33.325,
+          "decode_tps_median": 36.36
+        },
+        "memory": {
+          "peak_mb": 1602.808,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 2048,
+        "ppl": {
+          "ppl": 14.4865,
+          "seqlen": 2048,
+          "stride": 2048,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 2048,
+          "decode_tokens": 128,
+          "prefill_ms_median": 33.186,
+          "decode_tps_median": 36.14,
+          "cache_pruning": {
+            "applied_steps": 0,
+            "last": {
+              "applied": false,
+              "original_len": 2176,
+              "kept_len": 1088,
+              "pruned": 0,
+              "layers": 0,
+              "reason": "unsupported_cache"
+            },
+            "cache_position_passed": true,
+            "reset_peak_after_prefill": true
+          }
+        },
+        "memory": {
+          "peak_mb": 1602.809,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.004,
+        "decode": 0.994
+      },
+      "memory_delta_mb": -0.001
+    },
+    {
+      "seqlen": 4096,
+      "baseline": {
+        "seqlen": 4096,
+        "ppl": {
+          "ppl": 13.0695,
+          "seqlen": 4096,
+          "stride": 4096,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 4096,
+          "decode_tokens": 128,
+          "prefill_ms_median": 46.003,
+          "decode_tps_median": 36.82
+        },
+        "memory": {
+          "peak_mb": 2248.73,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 4096,
+        "ppl": {
+          "ppl": 13.7765,
+          "seqlen": 4096,
+          "stride": 4096,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 4096,
+          "decode_tokens": 128,
+          "prefill_ms_median": 45.999,
+          "decode_tps_median": 36.44,
+          "cache_pruning": {
+            "applied_steps": 0,
+            "last": {
+              "applied": false,
+              "original_len": 4224,
+              "kept_len": 1088,
+              "pruned": 0,
+              "layers": 0,
+              "reason": "unsupported_cache"
+            },
+            "cache_position_passed": true,
+            "reset_peak_after_prefill": true
+          }
+        },
+        "memory": {
+          "peak_mb": 2248.73,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.0,
+        "decode": 0.99
+      },
+      "memory_delta_mb": 0.0
+    },
+    {
+      "seqlen": 8192,
+      "baseline": {
+        "seqlen": 8192,
+        "ppl": {
+          "ppl": 12.3547,
+          "seqlen": 8192,
+          "stride": 8192,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 8192,
+          "decode_tokens": 128,
+          "prefill_ms_median": 100.519,
+          "decode_tps_median": 36.76
+        },
+        "memory": {
+          "peak_mb": 3527.166,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 8192,
+        "ppl": {
+          "ppl": 13.4161,
+          "seqlen": 8192,
+          "stride": 8192,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 8192,
+          "decode_tokens": 128,
+          "prefill_ms_median": 97.847,
+          "decode_tps_median": 36.35,
+          "cache_pruning": {
+            "applied_steps": 0,
+            "last": {
+              "applied": false,
+              "original_len": 8320,
+              "kept_len": 1088,
+              "pruned": 0,
+              "layers": 0,
+              "reason": "unsupported_cache"
+            },
+            "cache_position_passed": true,
+            "reset_peak_after_prefill": true
+          }
+        },
+        "memory": {
+          "peak_mb": 3527.167,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 1.027,
+        "decode": 0.989
+      },
+      "memory_delta_mb": -0.001
+    },
+    {
+      "seqlen": 16384,
+      "baseline": {
+        "seqlen": 16384,
+        "ppl": {
+          "ppl": 11.9289,
+          "seqlen": 16384,
+          "stride": 16384,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 16384,
+          "decode_tokens": 128,
+          "prefill_ms_median": 215.437,
+          "decode_tps_median": 36.83
+        },
+        "memory": {
+          "peak_mb": 6093.46,
+          "current_mb": 959.292
+        }
+      },
+      "sparse": {
+        "seqlen": 16384,
+        "ppl": {
+          "ppl": 13.2824,
+          "seqlen": 16384,
+          "stride": 16384,
+          "n_tokens": 299078
+        },
+        "latency": {
+          "prefill_len": 16384,
+          "decode_tokens": 128,
+          "prefill_ms_median": 215.567,
+          "decode_tps_median": 36.23,
+          "cache_pruning": {
+            "applied_steps": 0,
+            "last": {
+              "applied": false,
+              "original_len": 16512,
+              "kept_len": 1088,
+              "pruned": 0,
+              "layers": 0,
+              "reason": "unsupported_cache"
+            },
+            "cache_position_passed": true,
+            "reset_peak_after_prefill": true
+          }
+        },
+        "memory": {
+          "peak_mb": 6093.461,
+          "current_mb": 959.292
+        }
+      },
+      "speedup": {
+        "prefill": 0.999,
+        "decode": 0.984
+      },
+      "memory_delta_mb": -0.001
+    }
+  ]
+}
