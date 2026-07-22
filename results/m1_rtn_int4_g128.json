@@ -1,7 +1,7 @@
 {
   "exp_id": "m1_rtn_int4_g128",
   "env": {
-    "timestamp": "2026-07-22T01:39:30.069163+00:00",
+    "timestamp": "2026-07-22T01:57:24.378512+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
@@ -55,8 +55,8 @@
   "latency": {
     "prefill_len": 512,
     "decode_tokens": 128,
-    "prefill_ms_median": 30.708,
-    "decode_tps_median": 36.78
+    "prefill_ms_median": 29.497,
+    "decode_tps_median": 37.9
   },
   "memory": {
     "peak_mb": 4573.091,

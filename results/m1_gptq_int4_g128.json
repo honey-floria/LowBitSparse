@@ -1,7 +1,7 @@
 {
   "exp_id": "m1_gptq_int4_g128",
   "env": {
-    "timestamp": "2026-07-22T01:41:14.751528+00:00",
+    "timestamp": "2026-07-22T01:59:07.349086+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
@@ -57,8 +57,8 @@
   "latency": {
     "prefill_len": 512,
     "decode_tokens": 128,
-    "prefill_ms_median": 29.696,
-    "decode_tps_median": 37.49
+    "prefill_ms_median": 29.142,
+    "decode_tps_median": 38.41
   },
   "memory": {
     "peak_mb": 7186.591,
