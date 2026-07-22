@@ -3,6 +3,7 @@
 这个模块只收口超参,不掺入任何实现逻辑:
 - `mode` 决定稀疏策略(sliding / streaming / block)。
 - `window_size` / `sink_size` / `block_size` 控制不同模式的可见范围。
+- `cache_pruning` 决定是否启用 M2-c 的 KV cache 真实裁剪路径。
 - `benchmark_lengths` 统一给 M2 benchmark 用,方便把 2k/4k/8k/16k 这组长度
   放进同一份 YAML 里复现。
 """
@@ -37,6 +38,7 @@ class SparseConfig:
         sink_size:        StreamingLLM 的 sink token 数,前几个 token 永久在线。
         block_size:       block_sparse 的块边长。
         block_lookback:   块稀疏里向后保留几个块。
+        cache_pruning:    是否启用 StreamingLLM KV cache 裁剪(M2-c)。
         benchmark_lengths: benchmark 统一评测的序列长度集合。
     """
 
@@ -45,6 +47,7 @@ class SparseConfig:
     sink_size: int = 64
     block_size: int = 128
     block_lookback: int = 1
+    cache_pruning: bool = False
     benchmark_lengths: tuple = (2048, 4096, 8192, 16384)
 
     @classmethod

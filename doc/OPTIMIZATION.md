@@ -33,11 +33,17 @@
 | AWQ INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head, calib 128×512             | 16.3182(+14.6%,恢复 RTN 缺口 26.3%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.88 ms / 37.22 tok/s(同基线) | 7187.2 MB(同上) |
 | **GPTQ INT4 + emb INT8** ⭐推荐 | Qwen2.5-0.5B-Instruct | linears GPTQ INT4 + embedding RTN INT8 | 15.4275(+8.3%,≈纯 GPTQ INT4,几乎白拿) | 315.3 MB(等效 5.353bit,压缩 **2.988x**) | 同基线(伪量化) | — |
 | GPTQ INT4 + emb INT4(极限) | Qwen2.5-0.5B-Instruct | linears + embedding 均 INT4 | 16.6881(+17.2%) | 250.4 MB(等效 4.251bit,压缩 **3.763x**) | 同基线(伪量化) | — |
+| M2 Sliding Window w1024 | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +44.871(不可用) | 942.3 MB(不改权重) | prefill 0.659x / decode 0.871x | sparse 峰值平均 +170.0 MB |
+| **M2 StreamingLLM s64 w1024** | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +0.841(质量最好) | 942.3 MB(不改权重) | prefill 0.659x / decode 0.871x | sparse 峰值平均 +170.5 MB |
+| M2 Block-sparse b128 l1 | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +4.519 | 942.3 MB(不改权重) | prefill 0.656x / decode 0.869x | sparse 峰值平均 +170.0 MB |
+| M2-c StreamingLLM KV prune | Qwen2.5-0.5B-Instruct | code path ready;A100 pending | -- | -- | decode 真裁剪已接入 | -- |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md` 与 `results/m2_sparse_*.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
+> **M2 口径说明**:M2 三行是 2k/4k/8k/16k 长序列均值,不是单一 seqlen=2048 PPL。当前 additive mask fallback 已跑通但未加速,其价值是后续 M2-c/M2-d 优化的负基线。
+> **M2-c 状态**:KV cache 裁剪代码与单测已落地,`profile_latency` 现在支持可选 `past_pruner` 和 `cache_position` 传递,但 A100 decode-only 回归尚未跑完,因此表里先放占位行。
 
 ---
 
@@ -294,5 +300,54 @@
 - `main.py sparse`、`lowbitsparse.sparse`、`lowbitsparse.sparse.benchmark` 可正常导入;`tqdm` 在无安装时已降级。
 
 **结论 & 下一步**:M2 代码链路已打通,可以直接在 A100 + HF 环境上跑长序列 benchmark 并回填 `results/`。当前还缺的是实机数值,不是实现本身。
+
+## [2026-07-22] M2-b — A100 长序列实测回填(功能完成,但未获得加速)
+**背景 / 目标**:把 `results/` 里的三组 M2 实测结果回填到文档,确认 Sliding Window / StreamingLLM / Block-sparse 在 Qwen2.5-0.5B-Instruct + A100 上的真实收益。
+
+**分析**:
+- 这次 A100 运行走通了完整链路,说明稀疏注入与 benchmark 脚本都可用。
+- 但当前实现是把稀疏约束合并成 4D additive `attention_mask`,实际很可能已经失去 FlashAttention / SDPA 的快路径,因此“mask 变稀疏”不等于“kernel 变快”。
+- 质量上,StreamingLLM 最稳;Sliding Window 在当前窗口大小下对 PPL 破坏最重,说明简单局部可见性对这个模型过激。
+
+**实验设置**:Qwen2.5-0.5B-Instruct;A100-SXM4-40GB;torch 2.11.0+cu128;seqlen 2048/4096/8192/16384;decode 128;warmup 2;repeat 5。结果文件:
+`results/m2_sparse_sliding_w1024.json`、`results/m2_sparse_streaming_s64_w1024.json`、`results/m2_sparse_block_b128_l1.json`。
+
+**结果(均值)**:
+
+| 模式 | 平均 prefill speedup | 平均 decode speedup | 平均 memory delta | 平均 ΔPPL |
+| --- | --- | --- | --- | --- |
+| Sliding Window w1024 | 0.659x | 0.871x | -170.0 MB | +44.871 |
+| StreamingLLM s64 w1024 | 0.659x | 0.871x | -170.5 MB | +0.841 |
+| Block-sparse b128 l1 | 0.656x | 0.869x | -170.0 MB | +4.519 |
+
+**关键观察**:
+1. **三种模式都没有加速**:prefill 全部 < 1，decode 也全部 < 1。最好的点也只是 2048 长度下约 0.92x，最差在 16384 长度掉到 0.39x。
+2. **内存没有下降，反而略增**:peak memory delta 全为负值，最大约 -512 MB，说明当前路径没有把稀疏性兑现成更省显存的执行。
+3. **质量分化明显**:StreamingLLM 基本可用(+0.841 PPL)，Block-sparse 次之(+4.519)，Sliding Window 最差(+44.871),已经超出可接受范围。
+
+**结论 & 下一步**:M2 的“代码与实测回填”已完成,但当前实现**不满足加速目标**。如果继续往前,需要从普通 attention_mask 注入切到 kernel-aware 的实现路径,尽量保住原生 attention fast path;否则稀疏只是语义上的,不是性能上的。
+
+## [2026-07-22] M2-c — StreamingLLM KV cache 裁剪代码落地与本地验证
+**背景 / 目标**:M2-b 证明 additive mask 语义可用但性能不涨。下一步把 StreamingLLM 的“可见性”从 mask 升级成真实 KV cache 裁剪,让 decode 阶段的 `kv_len` 真正变短。
+
+**分析**:
+- 只改 mask 不会减少 cache 体积,decode 仍要在完整历史上做注意力,所以速度和显存都很难改善。
+- 真裁剪的关键不是“删掉旧 token”这么简单,还要兼容 `past_key_values` 的不同形态,并在 RoPE 模型上保持绝对位置递增。
+- 现阶段先做 tuple / duck-typed `DynamicCache` 兼容,把 `cache_position` 透传做好,再去跑 A100。
+
+**方案**:
+- 新增 `lowbitsparse/sparse/cache.py`,实现 `streaming_keep_indices`、`prune_tensor_cache`、`prune_streaming_past_key_values`。
+- `profile_latency` 增加可选 `past_pruner` 和 `reset_peak_after_prefill`,decode 循环里裁剪旧 cache,支持把真实绝对 `cache_position` 传给模型。
+- `benchmark_sparse_attention` 在 `sparse.cache_pruning=true` 时切到 M2-c 路径:quality 继续用 StreamingLLM additive mask 的 teacher-forced PPL 参考,latency/memory 则走真实 KV 裁剪。
+- 新增 `configs/qwen0.5b_sparse_streaming_kvprune.yaml` 和 KV prune 单测。
+
+**结果**:
+- `python -m py_compile ...` 通过。
+- `pytest -q tests/test_sparse.py` 9 passed。
+- 本地已验证:keep indices、tuple cache 裁剪、短 cache no-op 都符合预期。
+
+**结论 & 下一步**:
+- M2-c 的代码面已经打通,下一步是 A100 回归,重点看 decode speedup 和 peak memory 是否真正改善。
+- 由于质量 PPL 仍用 additive mask 参考,后续结果要明确区分“质量参考”和“真实执行路径”。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

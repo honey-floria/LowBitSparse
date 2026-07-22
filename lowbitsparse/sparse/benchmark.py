@@ -15,25 +15,18 @@ from lowbitsparse.eval import eval_wikitext2_ppl, profile_latency, profile_memor
 from lowbitsparse.utils import get_logger
 
 from .apply import install_sparse_attention
+from .cache import prune_streaming_past_key_values
 from .config import SparseConfig
 
 
 log = get_logger()
 
 
-def _run_one(model, tokenizer, seqlen: int, eval_cfg: dict, profile_cfg: dict) -> dict:
-    """跑单个长度的一次完整评测。
-
-    PPL / latency / memory 三个指标保持和 M0/M1 一致,这样 M2 的结果可以直接
-    和前面里程碑横向比较。
-    """
-    if torch.cuda.is_available():
-        # 评测前清掉 CUDA 峰值,避免把上一轮 baseline 的峰值算进 sparse。
-        torch.cuda.reset_peak_memory_stats()
+def _run_ppl(model, tokenizer, seqlen: int, eval_cfg: dict) -> dict:
+    """只跑 WikiText-2 PPL,供普通 M2 和 M2-c 的质量参考复用。"""
     eval_cfg = eval_cfg or {}
-    profile_cfg = profile_cfg or {}
     try:
-        ppl = eval_wikitext2_ppl(
+        return eval_wikitext2_ppl(
             model, tokenizer,
             seqlen=seqlen,
             stride=seqlen,
@@ -45,44 +38,44 @@ def _run_one(model, tokenizer, seqlen: int, eval_cfg: dict, profile_cfg: dict) -
             "稀疏 benchmark 需要 `datasets` 依赖和 WikiText-2 数据集; "
             "当前环境缺少相关组件,无法计算 PPL。"
         ) from exc
+
+
+def _run_latency_memory(model, tokenizer, seqlen: int, profile_cfg: dict,
+                        past_pruner=None) -> dict:
+    """跑单个长度的 latency + memory,可选接入 KV cache pruner。"""
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    profile_cfg = profile_cfg or {}
     lat = profile_latency(
         model, tokenizer,
         prefill_len=seqlen,
         decode_tokens=profile_cfg.get("decode_tokens", 128),
         warmup=profile_cfg.get("warmup", 2),
         repeats=profile_cfg.get("repeats", 5),
+        past_pruner=past_pruner,
+        reset_peak_after_prefill=profile_cfg.get("reset_peak_after_prefill", False),
     )
     mem = profile_memory()
-    return {"ppl": ppl, "latency": lat, "memory": mem}
+    return {"latency": lat, "memory": mem}
 
 
-def benchmark_sparse_attention(model, tokenizer, sparse_cfg: SparseConfig,
-                               eval_cfg: dict = None,
-                               profile_cfg: dict = None) -> dict:
-    """先跑原始模型，再安装稀疏 mask，输出逐长度对照表。
+def _run_one(model, tokenizer, seqlen: int, eval_cfg: dict, profile_cfg: dict) -> dict:
+    """跑单个长度的一次完整评测。
 
-    返回结果已经整理成 JSON 友好的结构,可直接交给 `save_results` 落盘。
+    PPL / latency / memory 三个指标保持和 M0/M1 一致,这样 M2 的结果可以直接
+    和前面里程碑横向比较。
     """
-    lengths = tuple(sparse_cfg.benchmark_lengths)
-    baseline = []
-    for length in lengths:
-        log.info("[M2] baseline benchmark seqlen=%d", length)
-        baseline.append({"seqlen": length, **_run_one(model, tokenizer, length,
-                                                     eval_cfg, profile_cfg)})
+    if torch.cuda.is_available():
+        # 评测前清掉 CUDA 峰值,避免把上一轮 baseline 的峰值算进 sparse。
+        torch.cuda.reset_peak_memory_stats()
+    return {
+        "ppl": _run_ppl(model, tokenizer, seqlen, eval_cfg),
+        **_run_latency_memory(model, tokenizer, seqlen, profile_cfg),
+    }
 
-    # sparse 评测直接复用同一个 model,只切换 mask 行为。
-    patch = install_sparse_attention(model, sparse_cfg)
-    log.info("[M2] sparse patch installed: %s.%s",
-             patch.owner_name, patch.attr_name)
-    try:
-        sparse = []
-        for length in lengths:
-            log.info("[M2] sparse(%s) benchmark seqlen=%d", sparse_cfg.mode, length)
-            sparse.append({"seqlen": length, **_run_one(model, tokenizer, length,
-                                                        eval_cfg, profile_cfg)})
-    finally:
-        patch.restore()
 
+def _rows_from_runs(baseline, sparse) -> list:
+    """把 baseline/sparse 原始结果合成带 speedup 和显存差的表格。"""
     rows = []
     for base, sp in zip(baseline, sparse):
         # speedup 这里保持口径清晰:
@@ -105,15 +98,108 @@ def benchmark_sparse_attention(model, tokenizer, sparse_cfg: SparseConfig,
                 else round(base["memory"]["peak_mb"] - sp["memory"]["peak_mb"], 3)
             ),
         })
+    return rows
+
+
+def _sparse_config_payload(sparse_cfg: SparseConfig, lengths: tuple) -> dict:
+    return {
+        "mode": sparse_cfg.mode,
+        "window_size": sparse_cfg.window_size,
+        "sink_size": sparse_cfg.sink_size,
+        "block_size": sparse_cfg.block_size,
+        "block_lookback": sparse_cfg.block_lookback,
+        "cache_pruning": sparse_cfg.cache_pruning,
+        "benchmark_lengths": list(lengths),
+    }
+
+
+def benchmark_sparse_attention(model, tokenizer, sparse_cfg: SparseConfig,
+                               eval_cfg: dict = None,
+                               profile_cfg: dict = None) -> dict:
+    """先跑原始模型，再安装稀疏 mask，输出逐长度对照表。
+
+    返回结果已经整理成 JSON 友好的结构,可直接交给 `save_results` 落盘。
+    """
+    if sparse_cfg.cache_pruning:
+        return benchmark_streaming_kv_pruning(
+            model, tokenizer, sparse_cfg, eval_cfg=eval_cfg, profile_cfg=profile_cfg)
+
+    lengths = tuple(sparse_cfg.benchmark_lengths)
+    baseline = []
+    for length in lengths:
+        log.info("[M2] baseline benchmark seqlen=%d", length)
+        baseline.append({"seqlen": length, **_run_one(model, tokenizer, length,
+                                                     eval_cfg, profile_cfg)})
+
+    # sparse 评测直接复用同一个 model,只切换 mask 行为。
+    patch = install_sparse_attention(model, sparse_cfg)
+    log.info("[M2] sparse patch installed: %s.%s",
+             patch.owner_name, patch.attr_name)
+    try:
+        sparse = []
+        for length in lengths:
+            log.info("[M2] sparse(%s) benchmark seqlen=%d", sparse_cfg.mode, length)
+            sparse.append({"seqlen": length, **_run_one(model, tokenizer, length,
+                                                        eval_cfg, profile_cfg)})
+    finally:
+        patch.restore()
 
     return {
-        "sparse_config": {
-            "mode": sparse_cfg.mode,
-            "window_size": sparse_cfg.window_size,
-            "sink_size": sparse_cfg.sink_size,
-            "block_size": sparse_cfg.block_size,
-            "block_lookback": sparse_cfg.block_lookback,
-            "benchmark_lengths": list(lengths),
-        },
-        "rows": rows,
+        "sparse_config": _sparse_config_payload(sparse_cfg, lengths),
+        "rows": _rows_from_runs(baseline, sparse),
+    }
+
+
+def benchmark_streaming_kv_pruning(model, tokenizer, sparse_cfg: SparseConfig,
+                                   eval_cfg: dict = None,
+                                   profile_cfg: dict = None) -> dict:
+    """M2-c:StreamingLLM KV cache 裁剪 benchmark。
+
+    质量指标仍用 StreamingLLM additive mask 跑 teacher-forced PPL 作为参考;
+    latency/memory 则不安装 additive mask,而是在 decode cache 上真实裁剪 K/V,
+    使 `kv_len` 变成 sink+window 量级。
+    """
+    if sparse_cfg.mode != "streaming_llm":
+        raise ValueError("M2-c cache_pruning 当前只支持 mode=streaming_llm")
+
+    lengths = tuple(sparse_cfg.benchmark_lengths)
+    baseline = []
+    for length in lengths:
+        log.info("[M2-c] baseline benchmark seqlen=%d", length)
+        baseline.append({"seqlen": length, **_run_one(model, tokenizer, length,
+                                                     eval_cfg, profile_cfg)})
+
+    # PPL 仍通过 additive mask 表示 StreamingLLM 可见性,仅作为质量参考。
+    patch = install_sparse_attention(model, sparse_cfg)
+    try:
+        sparse_ppl = []
+        for length in lengths:
+            log.info("[M2-c] sparse quality(reference mask) seqlen=%d", length)
+            sparse_ppl.append({"seqlen": length, "ppl": _run_ppl(model, tokenizer,
+                                                                 length, eval_cfg)})
+    finally:
+        patch.restore()
+
+    def pruner(past):
+        return prune_streaming_past_key_values(past, sparse_cfg)
+
+    sparse = []
+    for item in sparse_ppl:
+        length = item["seqlen"]
+        log.info("[M2-c] streaming KV prune latency seqlen=%d", length)
+        sparse.append({
+            "seqlen": length,
+            "ppl": item["ppl"],
+            **_run_latency_memory(model, tokenizer, length, profile_cfg,
+                                  past_pruner=pruner),
+        })
+
+    return {
+        "sparse_config": _sparse_config_payload(sparse_cfg, lengths),
+        "benchmark_kind": "streaming_kv_pruning",
+        "quality_note": (
+            "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;"
+            "latency/memory 使用真实 KV cache 裁剪路径。"
+        ),
+        "rows": _rows_from_runs(baseline, sparse),
     }

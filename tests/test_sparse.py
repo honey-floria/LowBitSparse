@@ -5,8 +5,10 @@ torch = pytest.importorskip("torch")
 import torch.nn as nn
 
 from lowbitsparse.sparse import (
-    SparseConfig, build_sparse_attention_mask, install_sparse_attention,
-    sparse_density, sparse_visibility)
+    CachePruneStats, SparseConfig, build_sparse_attention_mask,
+    install_sparse_attention, install_streaming_kv_pruning,
+    prune_streaming_past_key_values,
+    sparse_density, sparse_visibility, streaming_keep_indices)
 
 
 def test_sliding_window_visibility():
@@ -37,6 +39,44 @@ def test_block_sparse_has_density():
     density = sparse_density(8, 8, cfg)
     assert 0 < density["density"] < 1
     assert density["sparsity"] > 0
+
+
+def test_streaming_keep_indices_keeps_sink_and_window():
+    idx = streaming_keep_indices(seq_len=10, sink_size=2, window_size=3)
+    assert torch.equal(idx, torch.tensor([0, 1, 7, 8, 9]))
+
+
+def test_streaming_keep_indices_no_prune_when_short():
+    idx = streaming_keep_indices(seq_len=4, sink_size=2, window_size=3)
+    assert torch.equal(idx, torch.tensor([0, 1, 2, 3]))
+
+
+def test_prune_tuple_past_key_values():
+    cfg = SparseConfig(mode="streaming_llm", window_size=3, sink_size=2)
+    key = torch.randn(1, 4, 10, 8)
+    value = torch.randn(1, 4, 10, 8)
+    past = ((key, value),)
+
+    pruned, stats = prune_streaming_past_key_values(past, cfg)
+    assert isinstance(stats, CachePruneStats)
+    assert stats.applied
+    assert stats.original_len == 10
+    assert stats.kept_len == 5
+    assert stats.pruned == 5
+    assert pruned[0][0].shape[-2] == 5
+    assert pruned[0][1].shape[-2] == 5
+
+
+def test_prune_tuple_short_cache_noop():
+    cfg = SparseConfig(mode="streaming_llm", window_size=3, sink_size=2)
+    key = torch.randn(1, 4, 4, 8)
+    value = torch.randn(1, 4, 4, 8)
+    past = ((key, value),)
+
+    pruned, stats = prune_streaming_past_key_values(past, cfg)
+    assert not stats.applied
+    assert stats.reason == "within_budget"
+    assert pruned[0][0].shape[-2] == 4
 
 
 class TinySparseLM(nn.Module):
@@ -90,6 +130,25 @@ class ForwardOnlyLM(nn.Module):
         return self.proj(self.embed(input_ids))
 
 
+class DummyOutput:
+    def __init__(self, logits, past_key_values=None):
+        self.logits = logits
+        self.past_key_values = past_key_values
+
+
+class KVForwardLM(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj = nn.Linear(8, 8)
+        self.last_input = None
+
+    def forward(self, input_ids, past_key_values=None, use_cache=False):
+        self.last_input = input_ids
+        key = torch.randn(1, 2, 10, 4)
+        value = torch.randn(1, 2, 10, 4)
+        return DummyOutput(self.proj(torch.randn(1, 1, 8)), ((key, value),))
+
+
 def test_install_sparse_attention_forward_fallback():
     model = ForwardOnlyLM()
     ids = torch.randint(0, 32, (2, 6))
@@ -108,3 +167,19 @@ def test_install_sparse_attention_forward_fallback():
 
     model(ids)
     assert model.last_attention_mask is None
+
+
+def test_install_streaming_kv_pruning_forward_wrapper():
+    model = KVForwardLM()
+    cfg = SparseConfig(mode="streaming_llm", window_size=3, sink_size=2)
+    handle = install_streaming_kv_pruning(model, cfg)
+    try:
+        out = model(torch.randint(0, 8, (1, 1)))
+        assert out.past_key_values[0][0].shape[-2] == 5
+        assert handle.last_stats is not None
+        assert handle.last_stats.applied
+    finally:
+        handle.restore()
+
+    restored = model(torch.randint(0, 8, (1, 1)))
+    assert restored.past_key_values[0][0].shape[-2] == 10

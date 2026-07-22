@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 压缩比 | 模型体积 / 平均比特数 | INT4 达到 ~3.5-4x 体积压缩 ✅ 达成(emb INT4 3.76x;emb INT8 2.99x 零精度代价,见 M1-g) |
 | 精度 | WikiText-2 PPL、下游任务 | INT4 PPL 退化 < 1.0(蒸馏后) |
-| 加速比 | 长序列 prefill / decode 延迟 | 稀疏注意力 8k+ 序列 ≥ 1.5x |
+| 加速比 | 长序列 prefill / decode 延迟 | 稀疏注意力 8k+ 序列 ≥ 1.5x(当前实现未达标,见 M2) |
 | 恢复曲线 | 蒸馏 step vs PPL | 恢复 RTN-INT4 损失的 ≥ 60% |
 
 ### 1.3 里程碑(来自 README)
@@ -147,8 +147,21 @@ LowBitSparse/
 - [x] Sliding Window 实现 + 窗口大小扫描
 - [x] StreamingLLM(sink + 窗口)实现
 - [x] Block-sparse 实现(可选)
-- [~] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存(benchmark 命令已实现,待 A100 实测)
-- [~] **验收**:加速比曲线 + 长文质量保持表(待 A100 结果回填)
+- [x] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存(A100 已回填 `results/m2_*.json`)
+- [x] **验收**:加速比曲线 + 长文质量保持表(已回填,但当前实现未达到加速目标)
+
+> 备注:M2 的代码链路和实验记录已完成,但本轮 A100 实测没有拿到加速,当前更像“功能完成 + 结果负反馈”。若继续攻坚,重点应转向 kernel-aware attention hook,而不是继续堆普通 additive mask。
+
+#### M2 后续优化计划
+- [~] **M2-c StreamingLLM KV cache 裁剪**:只保留 attention sink + 最近 window 的 K/V,让 decode 阶段真实缩短 `kv_len`,不再只靠 mask 屏蔽旧 token。
+      验收目标:StreamingLLM 质量保持 `ΔPPL < 1.5`,decode speedup > 1.2x,peak memory 不高于 dense baseline。
+- [x] Cache 兼容层:支持 HF `past_key_values` / `DynamicCache` / tuple cache 的读取、裁剪与回写,保证 `generate()` 和手写 profiler 都可用。
+- [x] M2-c 单测与 smoke:覆盖 sink 保留、窗口边界、cache 长度单调裁剪、restore 行为、无 cache 的 prefill 退化路径。
+- [ ] M2-c A100 回归:2k/4k/8k/16k decode-only benchmark,输出 `results/m2c_streaming_kvprune_*.json` 与汇总表。
+- [ ] **M2-d chunked prefill / local attention**:prefill 阶段避免构造完整 `[batch,1,q,kv]` additive mask,按 query chunk 只看局部 K/V。
+      验收目标:8k/16k peak memory 低于 dense baseline,prefill 不慢于 dense。
+- [ ] **M2-e kernel-aware attention hook**:从顶层 `attention_mask` 注入升级到 attention module 内部 patch,尽量保留 FlashAttention/SDPA fast path;必要时再评估 Triton/FlashAttention local/block kernel。
+      最终目标:8k+ prefill/decode 综合 speedup ≥ 1.5x。
 
 ### M3 — 量化感知蒸馏
 - [ ] 蒸馏数据管道(教师 logits 缓存或在线前向)
