@@ -1,7 +1,7 @@
 {
   "exp_id": "m2e_streaming_compile_probe",
   "env": {
-    "timestamp": "2026-07-22T14:14:06.097565+00:00",
+    "timestamp": "2026-07-22T14:53:45.781661+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
@@ -73,8 +73,55 @@
         "latency": {
           "prefill_len": 2048,
           "decode_tokens": 128,
-          "prefill_ms_median": 32.312,
-          "decode_tps_median": 36.93
+          "prefill_ms_median": 33.206,
+          "decode_tps_median": 36.21,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 26.488
+              },
+              {
+                "len": 2,
+                "ms_median": 26.955
+              },
+              {
+                "len": 4,
+                "ms_median": 27.074
+              },
+              {
+                "len": 8,
+                "ms_median": 27.1016
+              },
+              {
+                "len": 16,
+                "ms_median": 27.1981
+              },
+              {
+                "len": 32,
+                "ms_median": 28.1709
+              },
+              {
+                "len": 64,
+                "ms_median": 28.2965
+              },
+              {
+                "len": 128,
+                "ms_median": 28.0697
+              },
+              {
+                "len": 256,
+                "ms_median": 28.2991
+              },
+              {
+                "len": 512,
+                "ms_median": 28.9444
+              }
+            ],
+            "overhead_floor_ms": 26.488,
+            "ratio_maxlen_over_len1": 1.093
+          }
         },
         "memory": {
           "peak_mb": 1606.598,
@@ -92,8 +139,55 @@
         "latency": {
           "prefill_len": 2048,
           "decode_tokens": 128,
-          "prefill_ms_median": 35.875,
-          "decode_tps_median": 33.18
+          "prefill_ms_median": 35.893,
+          "decode_tps_median": 32.84,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 29.4659
+              },
+              {
+                "len": 2,
+                "ms_median": 29.7403
+              },
+              {
+                "len": 4,
+                "ms_median": 29.6452
+              },
+              {
+                "len": 8,
+                "ms_median": 28.8412
+              },
+              {
+                "len": 16,
+                "ms_median": 28.5227
+              },
+              {
+                "len": 32,
+                "ms_median": 29.6147
+              },
+              {
+                "len": 64,
+                "ms_median": 29.966
+              },
+              {
+                "len": 128,
+                "ms_median": 29.7383
+              },
+              {
+                "len": 256,
+                "ms_median": 29.6129
+              },
+              {
+                "len": 512,
+                "ms_median": 30.9672
+              }
+            ],
+            "overhead_floor_ms": 29.4659,
+            "ratio_maxlen_over_len1": 1.051
+          }
         },
         "memory": {
           "peak_mb": 1614.598,
@@ -101,8 +195,8 @@
         }
       },
       "speedup": {
-        "prefill": 0.901,
-        "decode": 0.898
+        "prefill": 0.925,
+        "decode": 0.907
       },
       "memory_delta_mb": -8.0
     },
@@ -119,8 +213,55 @@
         "latency": {
           "prefill_len": 4096,
           "decode_tokens": 128,
-          "prefill_ms_median": 46.191,
-          "decode_tps_median": 36.69
+          "prefill_ms_median": 46.122,
+          "decode_tps_median": 36.04,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 25.9383
+              },
+              {
+                "len": 2,
+                "ms_median": 26.3895
+              },
+              {
+                "len": 4,
+                "ms_median": 26.7668
+              },
+              {
+                "len": 8,
+                "ms_median": 26.3906
+              },
+              {
+                "len": 16,
+                "ms_median": 26.9912
+              },
+              {
+                "len": 32,
+                "ms_median": 28.0213
+              },
+              {
+                "len": 64,
+                "ms_median": 27.9892
+              },
+              {
+                "len": 128,
+                "ms_median": 27.872
+              },
+              {
+                "len": 256,
+                "ms_median": 28.1096
+              },
+              {
+                "len": 512,
+                "ms_median": 28.7192
+              }
+            ],
+            "overhead_floor_ms": 25.9383,
+            "ratio_maxlen_over_len1": 1.107
+          }
         },
         "memory": {
           "peak_mb": 2256.02,
@@ -138,8 +279,55 @@
         "latency": {
           "prefill_len": 4096,
           "decode_tokens": 128,
-          "prefill_ms_median": 62.776,
-          "decode_tps_median": 32.8
+          "prefill_ms_median": 62.71,
+          "decode_tps_median": 32.96,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 28.1836
+              },
+              {
+                "len": 2,
+                "ms_median": 28.7526
+              },
+              {
+                "len": 4,
+                "ms_median": 28.844
+              },
+              {
+                "len": 8,
+                "ms_median": 28.0983
+              },
+              {
+                "len": 16,
+                "ms_median": 28.1083
+              },
+              {
+                "len": 32,
+                "ms_median": 28.971
+              },
+              {
+                "len": 64,
+                "ms_median": 29.4947
+              },
+              {
+                "len": 128,
+                "ms_median": 28.7841
+              },
+              {
+                "len": 256,
+                "ms_median": 28.9935
+              },
+              {
+                "len": 512,
+                "ms_median": 29.606
+              }
+            ],
+            "overhead_floor_ms": 28.1836,
+            "ratio_maxlen_over_len1": 1.05
+          }
         },
         "memory": {
           "peak_mb": 2288.02,
@@ -147,8 +335,8 @@
         }
       },
       "speedup": {
-        "prefill": 0.736,
-        "decode": 0.894
+        "prefill": 0.735,
+        "decode": 0.915
       },
       "memory_delta_mb": -32.0
     },
@@ -165,8 +353,55 @@
         "latency": {
           "prefill_len": 8192,
           "decode_tokens": 128,
-          "prefill_ms_median": 100.392,
-          "decode_tps_median": 36.66
+          "prefill_ms_median": 100.347,
+          "decode_tps_median": 36.11,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 26.5194
+              },
+              {
+                "len": 2,
+                "ms_median": 26.5518
+              },
+              {
+                "len": 4,
+                "ms_median": 26.5894
+              },
+              {
+                "len": 8,
+                "ms_median": 26.7956
+              },
+              {
+                "len": 16,
+                "ms_median": 26.7186
+              },
+              {
+                "len": 32,
+                "ms_median": 27.8582
+              },
+              {
+                "len": 64,
+                "ms_median": 27.769
+              },
+              {
+                "len": 128,
+                "ms_median": 27.6676
+              },
+              {
+                "len": 256,
+                "ms_median": 28.1368
+              },
+              {
+                "len": 512,
+                "ms_median": 28.5241
+              }
+            ],
+            "overhead_floor_ms": 26.5194,
+            "ratio_maxlen_over_len1": 1.076
+          }
         },
         "memory": {
           "peak_mb": 3541.456,
@@ -184,8 +419,55 @@
         "latency": {
           "prefill_len": 8192,
           "decode_tokens": 128,
-          "prefill_ms_median": 172.318,
-          "decode_tps_median": 32.83
+          "prefill_ms_median": 172.374,
+          "decode_tps_median": 32.97,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 28.8697
+              },
+              {
+                "len": 2,
+                "ms_median": 29.4097
+              },
+              {
+                "len": 4,
+                "ms_median": 29.5808
+              },
+              {
+                "len": 8,
+                "ms_median": 28.9791
+              },
+              {
+                "len": 16,
+                "ms_median": 28.4127
+              },
+              {
+                "len": 32,
+                "ms_median": 29.1849
+              },
+              {
+                "len": 64,
+                "ms_median": 29.2224
+              },
+              {
+                "len": 128,
+                "ms_median": 29.0514
+              },
+              {
+                "len": 256,
+                "ms_median": 28.9148
+              },
+              {
+                "len": 512,
+                "ms_median": 33.0273
+              }
+            ],
+            "overhead_floor_ms": 28.8697,
+            "ratio_maxlen_over_len1": 1.144
+          }
         },
         "memory": {
           "peak_mb": 3669.52,
@@ -193,8 +475,8 @@
         }
       },
       "speedup": {
-        "prefill": 0.583,
-        "decode": 0.896
+        "prefill": 0.582,
+        "decode": 0.913
       },
       "memory_delta_mb": -128.064
     },
@@ -211,8 +493,55 @@
         "latency": {
           "prefill_len": 16384,
           "decode_tokens": 128,
-          "prefill_ms_median": 229.074,
-          "decode_tps_median": 36.73
+          "prefill_ms_median": 219.065,
+          "decode_tps_median": 35.99,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 26.4978
+              },
+              {
+                "len": 2,
+                "ms_median": 26.7973
+              },
+              {
+                "len": 4,
+                "ms_median": 26.7919
+              },
+              {
+                "len": 8,
+                "ms_median": 26.7726
+              },
+              {
+                "len": 16,
+                "ms_median": 26.8876
+              },
+              {
+                "len": 32,
+                "ms_median": 28.3556
+              },
+              {
+                "len": 64,
+                "ms_median": 28.2171
+              },
+              {
+                "len": 128,
+                "ms_median": 27.7383
+              },
+              {
+                "len": 256,
+                "ms_median": 27.754
+              },
+              {
+                "len": 512,
+                "ms_median": 28.6316
+              }
+            ],
+            "overhead_floor_ms": 26.4978,
+            "ratio_maxlen_over_len1": 1.081
+          }
         },
         "memory": {
           "peak_mb": 6121.818,
@@ -230,8 +559,55 @@
         "latency": {
           "prefill_len": 16384,
           "decode_tokens": 128,
-          "prefill_ms_median": 536.38,
-          "decode_tps_median": 28.44
+          "prefill_ms_median": 536.524,
+          "decode_tps_median": 28.48,
+          "forward_scaling": {
+            "available": true,
+            "points": [
+              {
+                "len": 1,
+                "ms_median": 28.5945
+              },
+              {
+                "len": 2,
+                "ms_median": 29.942
+              },
+              {
+                "len": 4,
+                "ms_median": 30.9444
+              },
+              {
+                "len": 8,
+                "ms_median": 30.0549
+              },
+              {
+                "len": 16,
+                "ms_median": 29.8432
+              },
+              {
+                "len": 32,
+                "ms_median": 30.0732
+              },
+              {
+                "len": 64,
+                "ms_median": 30.76
+              },
+              {
+                "len": 128,
+                "ms_median": 30.742
+              },
+              {
+                "len": 256,
+                "ms_median": 30.8847
+              },
+              {
+                "len": 512,
+                "ms_median": 31.7041
+              }
+            ],
+            "overhead_floor_ms": 28.5945,
+            "ratio_maxlen_over_len1": 1.109
+          }
         },
         "memory": {
           "peak_mb": 6633.873,
@@ -239,8 +615,8 @@
         }
       },
       "speedup": {
-        "prefill": 0.427,
-        "decode": 0.774
+        "prefill": 0.408,
+        "decode": 0.791
       },
       "memory_delta_mb": -512.055
     }
