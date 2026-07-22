@@ -75,3 +75,36 @@ def test_install_sparse_attention_patches_and_restores():
 
     restored = model._update_causal_mask(None, x)
     assert torch.equal(restored, base)
+
+
+class ForwardOnlyLM(nn.Module):
+    def __init__(self, vocab=32, d=16):
+        super().__init__()
+        self.embed = nn.Embedding(vocab, d)
+        self.proj = nn.Linear(d, vocab)
+        self.last_attention_mask = None
+
+    def forward(self, input_ids, attention_mask=None, past_key_values=None,
+                use_cache=False):
+        self.last_attention_mask = attention_mask
+        return self.proj(self.embed(input_ids))
+
+
+def test_install_sparse_attention_forward_fallback():
+    model = ForwardOnlyLM()
+    ids = torch.randint(0, 32, (2, 6))
+    assert model.forward.__self__ is model
+
+    cfg = SparseConfig(mode="sliding_window", window_size=3)
+    handle = install_sparse_attention(model, cfg)
+    try:
+        model(ids)
+        injected = model.last_attention_mask
+        expected = build_sparse_attention_mask(6, 6, cfg, dtype=next(model.parameters()).dtype)
+        assert injected.shape == (1, 1, 6, 6)
+        assert torch.equal(injected, expected)
+    finally:
+        handle.restore()
+
+    model(ids)
+    assert model.last_attention_mask is None

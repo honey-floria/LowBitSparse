@@ -72,6 +72,8 @@ def benchmark_sparse_attention(model, tokenizer, sparse_cfg: SparseConfig,
 
     # sparse 评测直接复用同一个 model,只切换 mask 行为。
     patch = install_sparse_attention(model, sparse_cfg)
+    log.info("[M2] sparse patch installed: %s.%s",
+             patch.owner_name, patch.attr_name)
     try:
         sparse = []
         for length in lengths:

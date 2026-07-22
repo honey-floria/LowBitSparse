@@ -4,6 +4,11 @@
 - 先找到“模型里真正负责构造 causal mask 的位置”。
 - 再包一层轻量 wrapper，只改 mask，不改权重和主干计算。
 - 最后返回一个可恢复的 handle，方便 benchmark 前后切换回原行为。
+
+兼容策略:
+- 优先 patch HF 常见的 `_update_causal_mask`,这是侵入最小、最稳定的路径。
+- 若模型没有暴露该方法,退回到包一层顶层 `forward`,直接注入 4D additive
+  `attention_mask`。Colab 上某些 transformers/Qwen 版本会走这个 fallback。
 """
 from __future__ import annotations
 
@@ -117,6 +122,66 @@ def _infer_shape(base_mask, bound, target) -> tuple:
     return q_len, kv_len, device, dtype
 
 
+def _infer_forward_shape(args, kwargs, target) -> tuple:
+    """从顶层 forward 入参推断 sparse mask 形状。
+
+    fallback patch 不依赖 HF 内部实现,只能从 `input_ids` / `inputs_embeds` /
+    `attention_mask` / `past_key_values` 这些公开参数里推断长度。
+    """
+    input_ids = kwargs.get("input_ids")
+    inputs_embeds = kwargs.get("inputs_embeds")
+    if input_ids is None and inputs_embeds is None and args:
+        # HF CausalLM 的第一个位置参数通常就是 input_ids。
+        input_ids = args[0]
+
+    q_len = None
+    device = None
+    dtype = None
+    if torch.is_tensor(inputs_embeds):
+        q_len = int(inputs_embeds.shape[1])
+        device = inputs_embeds.device
+        dtype = inputs_embeds.dtype
+    elif torch.is_tensor(input_ids):
+        q_len = int(input_ids.shape[1])
+        device = input_ids.device
+
+    try:
+        first_param = next(target.parameters())
+        device = first_param.device if device is None else device
+        dtype = first_param.dtype if dtype is None else dtype
+    except StopIteration:
+        device = torch.device("cpu") if device is None else device
+        dtype = torch.float32 if dtype is None else dtype
+
+    attn_mask = kwargs.get("attention_mask")
+    if torch.is_tensor(attn_mask) and attn_mask.dim() >= 2:
+        kv_len = int(attn_mask.shape[-1])
+    else:
+        past = kwargs.get("past_key_values")
+        if past is None:
+            past = kwargs.get("past_key_value")
+        kv_len = _get_past_length(past) + (q_len or 0)
+    return q_len, kv_len, device, dtype
+
+
+def _padding_to_additive_mask(attention_mask, q_len: int, kv_len: int,
+                              dtype, device):
+    """把常见 2D padding mask 转成 [batch,1,q,kv] additive mask。
+
+    HF tokenizer 通常给 1=有效 token、0=padding 的 2D mask。顶层 forward
+    fallback 注入 4D sparse mask 时,需要把 padding 约束一起保留下来。
+    """
+    if not torch.is_tensor(attention_mask):
+        return None
+    if attention_mask.dim() >= 4:
+        return attention_mask.to(device=device, dtype=dtype)
+    if attention_mask.dim() != 2:
+        return None
+    pad = attention_mask[:, None, None, :kv_len].to(device=device)
+    mask = torch.zeros((pad.shape[0], 1, q_len, kv_len), device=device, dtype=dtype)
+    return mask.masked_fill(pad == 0, torch.finfo(dtype).min)
+
+
 def _merge_masks(base_mask, sparse_mask):
     """把原 causal mask 和稀疏 mask 合成一个最终 mask。
 
@@ -136,13 +201,14 @@ def _merge_masks(base_mask, sparse_mask):
 class SparsePatchHandle:
     """保存一次 patch 的上下文,支持 benchmark 后恢复原始实现。"""
     owner: object
+    attr_name: str
     original: object
     config: SparseConfig
     owner_name: str
 
     def restore(self):
-        """恢复被替换前的 `_update_causal_mask`。"""
-        setattr(self.owner, "_update_causal_mask", self.original)
+        """恢复被替换前的方法。"""
+        setattr(self.owner, self.attr_name, self.original)
 
 
 def install_sparse_attention(model, cfg: SparseConfig) -> SparsePatchHandle:
@@ -172,8 +238,30 @@ def install_sparse_attention(model, cfg: SparseConfig) -> SparsePatchHandle:
 
         setattr(owner, "_update_causal_mask", MethodType(wrapped, owner))
         owner_name = owner.__class__.__name__
-        return SparsePatchHandle(owner=owner, original=method,
+        return SparsePatchHandle(owner=owner, attr_name="_update_causal_mask", original=method,
                                  config=cfg, owner_name=owner_name)
 
-    raise NotImplementedError(
-        "当前模型未暴露 `_update_causal_mask`，无法注入稀疏注意力。")
+    return _install_forward_attention_mask(model, cfg)
+
+
+def _install_forward_attention_mask(model, cfg: SparseConfig) -> SparsePatchHandle:
+    """fallback:包顶层 forward,注入 4D sparse attention_mask。
+
+    这条路径兼容没有 `_update_causal_mask` 的 HF 模型。它要求模型 forward
+    能接受 4D additive `attention_mask`;Qwen/Llama 系列的现代实现通常支持。
+    """
+    original = model.forward
+
+    def wrapped(self, *args, **kwargs):
+        q_len, kv_len, device, dtype = _infer_forward_shape(args, kwargs, self)
+        if q_len is not None and kv_len is not None:
+            sparse_mask = build_sparse_attention_mask(q_len, kv_len, cfg,
+                                                      device=device, dtype=dtype)
+            pad_mask = _padding_to_additive_mask(
+                kwargs.get("attention_mask"), q_len, kv_len, dtype, device)
+            kwargs["attention_mask"] = _merge_masks(pad_mask, sparse_mask)
+        return original(*args, **kwargs)
+
+    setattr(model, "forward", MethodType(wrapped, model))
+    return SparsePatchHandle(owner=model, attr_name="forward", original=original,
+                             config=cfg, owner_name=model.__class__.__name__)
