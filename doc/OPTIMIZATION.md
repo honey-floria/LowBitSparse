@@ -36,14 +36,14 @@
 | M2 Sliding Window w1024 | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +44.871(不可用) | 942.3 MB(不改权重) | prefill 0.659x / decode 0.871x | sparse 峰值平均 +170.0 MB |
 | **M2 StreamingLLM s64 w1024** | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +0.841(质量最好) | 942.3 MB(不改权重) | prefill 0.659x / decode 0.871x | sparse 峰值平均 +170.5 MB |
 | M2 Block-sparse b128 l1 | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +4.519 | 942.3 MB(不改权重) | prefill 0.656x / decode 0.869x | sparse 峰值平均 +170.0 MB |
-| M2-c StreamingLLM KV prune | Qwen2.5-0.5B-Instruct | code path ready;A100 pending | -- | -- | decode 真裁剪已接入 | -- |
+| M2-c StreamingLLM KV prune | Qwen2.5-0.5B-Instruct | A100 回归已回填;本次 cache 形态未命中 pruner | avg ΔPPL +0.841;decode 0.989x | peak mem 基本不变 | 路径跑通但实际裁剪未生效 | 兼容层待重跑 |
 
 > 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md` 与 `results/m2_sparse_*.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
 > **M2 口径说明**:M2 三行是 2k/4k/8k/16k 长序列均值,不是单一 seqlen=2048 PPL。当前 additive mask fallback 已跑通但未加速,其价值是后续 M2-c/M2-d 优化的负基线。
-> **M2-c 状态**:KV cache 裁剪代码与单测已落地,`profile_latency` 现在支持可选 `past_pruner` 和 `cache_position` 传递,但 A100 decode-only 回归尚未跑完,因此表里先放占位行。
+> **M2-c 状态**:KV cache 裁剪代码与单测已落地,`profile_latency` 现在支持可选 `past_pruner` 和 `cache_position` 传递。A100 回归已经跑回来了,但结果显示实际 cache 形态没有被当前 pruner 命中,因此这份结果是负反馈:decode / memory 基本没有改善,需要更新兼容层后重跑。
 
 ---
 
@@ -349,5 +349,24 @@
 **结论 & 下一步**:
 - M2-c 的代码面已经打通,下一步是 A100 回归,重点看 decode speedup 和 peak memory 是否真正改善。
 - 由于质量 PPL 仍用 additive mask 参考,后续结果要明确区分“质量参考”和“真实执行路径”。
+
+## [2026-07-22] M2-c — A100 回归回填(negative: cache 兼容层未命中)
+**背景 / 目标**:把 M2-c 的真实回归结果拉回,验证 sink + window 的 KV prune 是否真的让 decode 短起来。
+
+**结果**:`results/m2c_streaming_kvprune_s64_w1024.json`
+
+| seqlen | baseline decode tok/s | prune decode tok/s | decode speedup | baseline peak MB | prune peak MB | ΔPPL |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2048 | 36.36 | 36.14 | 0.994x | 1602.808 | 1602.809 | +0.242 |
+| 4096 | 36.82 | 36.44 | 0.990x | 2248.730 | 2248.730 | +0.707 |
+| 8192 | 36.76 | 36.35 | 0.989x | 3527.166 | 3527.167 | +1.061 |
+| 16384 | 36.83 | 36.23 | 0.984x | 6093.460 | 6093.461 | +1.354 |
+
+**关键观察**:
+1. **实际没有裁剪生效**:结果里 `cache_pruning.last.reason=unsupported_cache`,`applied_steps=0`,说明本次 A100 返回的 cache 形态没被当前兼容层命中。
+2. **性能基本不变**:decode speedup 全部 < 1,峰值显存几乎完全贴着 baseline,证明这次运行只验证了路径,没拿到真实收益。
+3. **质量参考仍然合理**:StreamingLLM additive mask 的 teacher-forced PPL 仍保持在可接受范围内,最长 16k 时 ΔPPL +1.354,仍在 M2-c 质量阈值内。
+
+**结论 & 下一步**:这是一条典型的负结果,但价值很明确:问题不在 StreamingLLM 语义,而在 HF cache 兼容层。下一步要把当前 pruner 扩到新版 cache layer 结构后重跑,这条结果作为兼容性回归保留。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

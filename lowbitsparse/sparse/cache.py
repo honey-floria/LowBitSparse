@@ -100,6 +100,114 @@ def _legacy_seq_len(past_key_values) -> int:
     return _tensor_seq_len(first)
 
 
+def _set_attr_if_possible(obj, name: str, value) -> bool:
+    try:
+        setattr(obj, name, value)
+        return True
+    except Exception:
+        return False
+
+
+def _prune_layer_like(layer, keep_indices: torch.Tensor, original_len: int):
+    """裁剪单个 cache layer 或 legacy (key, value) 对。"""
+    if layer is None:
+        return layer, 0
+
+    if isinstance(layer, (tuple, list)):
+        if len(layer) >= 2 and torch.is_tensor(layer[0]) and torch.is_tensor(layer[1]):
+            key, value, *rest = layer
+            if _tensor_seq_len(key) != original_len or _tensor_seq_len(value) != original_len:
+                return layer, 0
+            key = prune_tensor_cache(key, keep_indices)
+            value = prune_tensor_cache(value, keep_indices)
+            return type(layer)((key, value, *rest)), 1
+        changed = 0
+        items = []
+        for item in layer:
+            new_item, item_changed = _prune_layer_like(item, keep_indices, original_len)
+            changed += item_changed
+            items.append(new_item)
+        return type(layer)(items), changed
+
+    if torch.is_tensor(layer):
+        return layer, 0
+
+    direct_pairs = (
+        ("keys", "values"),
+        ("key", "value"),
+        ("k_cache", "v_cache"),
+    )
+    for key_attr, value_attr in direct_pairs:
+        key = getattr(layer, key_attr, None)
+        value = getattr(layer, value_attr, None)
+        if not (torch.is_tensor(key) and torch.is_tensor(value)):
+            continue
+        if _tensor_seq_len(key) != original_len or _tensor_seq_len(value) != original_len:
+            continue
+        new_key = prune_tensor_cache(key, keep_indices)
+        new_value = prune_tensor_cache(value, keep_indices)
+        if _set_attr_if_possible(layer, key_attr, new_key) and _set_attr_if_possible(layer, value_attr, new_value):
+            for extra_attr in ("cumulative_length", "seq_length", "seq_len", "_seen_tokens"):
+                if hasattr(layer, extra_attr):
+                    _set_attr_if_possible(layer, extra_attr, int(keep_indices.numel()))
+            return layer, 1
+
+    return layer, 0
+
+
+def _prune_cache_container(past_key_values, keep_indices: torch.Tensor,
+                           original_len: int):
+    """递归裁剪新版 HF cache 容器。"""
+    # 一些实现把真正的 layer 列表挂在 `.layers` 上。
+    layers = getattr(past_key_values, "layers", None)
+    if isinstance(layers, list):
+        layer_count = 0
+        for i, layer in enumerate(layers):
+            new_layer, changed = _prune_layer_like(layer, keep_indices, original_len)
+            if changed:
+                layers[i] = new_layer
+            layer_count += changed
+        return past_key_values, layer_count
+
+    # 旧一些的容器可能分别暴露 key/value cache 列表。
+    key_cache = getattr(past_key_values, "key_cache", None)
+    value_cache = getattr(past_key_values, "value_cache", None)
+    if isinstance(key_cache, list) and isinstance(value_cache, list):
+        layer_count = 0
+        for i, (key, value) in enumerate(zip(key_cache, value_cache)):
+            if _tensor_seq_len(key) != original_len or _tensor_seq_len(value) != original_len:
+                continue
+            key_cache[i] = prune_tensor_cache(key, keep_indices)
+            value_cache[i] = prune_tensor_cache(value, keep_indices)
+            layer_count += 1
+        if layer_count and hasattr(past_key_values, "_seen_tokens"):
+            _set_attr_if_possible(past_key_values, "_seen_tokens", int(keep_indices.numel()))
+        return past_key_values, layer_count
+
+    # Decoder-only 的某些实现会把 cache 再包一层,例如 self/cross attention cache。
+    subattrs = ("self_attention_cache", "self_cache", "past", "cache")
+    layer_count = 0
+    for name in subattrs:
+        sub = getattr(past_key_values, name, None)
+        if sub is None:
+            continue
+        new_sub, changed = _prune_cache_object(sub, keep_indices, original_len)
+        if changed:
+            _set_attr_if_possible(past_key_values, name, new_sub)
+            layer_count += changed
+    if layer_count:
+        return past_key_values, layer_count
+    return past_key_values, 0
+
+
+def _prune_cache_object(past_key_values, keep_indices: torch.Tensor,
+                        original_len: int):
+    """对未知形态的 cache 做递归裁剪。"""
+    if isinstance(past_key_values, (tuple, list)):
+        return _prune_legacy_cache(past_key_values, keep_indices, original_len)
+    return _prune_cache_container(past_key_values, keep_indices, original_len)
+
+
 def _prune_legacy_cache(past_key_values, keep_indices: torch.Tensor,
                         original_len: int):
     """裁剪 tuple/list 格式的 legacy `past_key_values`。"""
@@ -120,36 +228,6 @@ def _prune_legacy_cache(past_key_values, keep_indices: torch.Tensor,
         pruned_layers.append(layer_type((key, value, *rest)))
     cache_type = type(past_key_values)
     return cache_type(pruned_layers), layer_count
-
-
-def _prune_dynamic_cache(past_key_values, keep_indices: torch.Tensor,
-                         original_len: int):
-    """裁剪 HF `DynamicCache` 常见的 key_cache/value_cache 列表。
-
-    不强依赖 transformers 导入,只按 duck typing 判断属性。这里选择原地修改,
-    因为 DynamicCache 通常由多层 list 持有,深拷贝会额外放大显存峰值。
-    """
-    key_cache = getattr(past_key_values, "key_cache", None)
-    value_cache = getattr(past_key_values, "value_cache", None)
-    if not isinstance(key_cache, list) or not isinstance(value_cache, list):
-        return past_key_values, 0
-
-    layer_count = 0
-    for i, (key, value) in enumerate(zip(key_cache, value_cache)):
-        if _tensor_seq_len(key) != original_len or _tensor_seq_len(value) != original_len:
-            continue
-        key_cache[i] = prune_tensor_cache(key, keep_indices)
-        value_cache[i] = prune_tensor_cache(value, keep_indices)
-        layer_count += 1
-
-    # 部分 transformers 版本维护 `_seen_tokens`;裁剪后同步到物理长度。
-    # 绝对位置仍由调用侧传 `cache_position` 保持。
-    if layer_count and hasattr(past_key_values, "_seen_tokens"):
-        try:
-            past_key_values._seen_tokens = int(keep_indices.numel())
-        except Exception:
-            pass
-    return past_key_values, layer_count
 
 
 def prune_streaming_past_key_values(past_key_values, cfg: SparseConfig):
@@ -195,10 +273,7 @@ def prune_streaming_past_key_values(past_key_values, cfg: SparseConfig):
             applied=False, original_len=original_len, kept_len=kept_len,
             pruned=0, reason="within_budget")
 
-    if isinstance(past_key_values, (tuple, list)):
-        new_past, layers = _prune_legacy_cache(past_key_values, keep_indices, original_len)
-    else:
-        new_past, layers = _prune_dynamic_cache(past_key_values, keep_indices, original_len)
+    new_past, layers = _prune_cache_object(past_key_values, keep_indices, original_len)
 
     if layers <= 0:
         return past_key_values, CachePruneStats(

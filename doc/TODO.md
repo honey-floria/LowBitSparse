@@ -157,7 +157,8 @@ LowBitSparse/
       验收目标:StreamingLLM 质量保持 `ΔPPL < 1.5`,decode speedup > 1.2x,peak memory 不高于 dense baseline。
 - [x] Cache 兼容层:支持 HF `past_key_values` / `DynamicCache` / tuple cache 的读取、裁剪与回写,保证 `generate()` 和手写 profiler 都可用。
 - [x] M2-c 单测与 smoke:覆盖 sink 保留、窗口边界、cache 长度单调裁剪、restore 行为、无 cache 的 prefill 退化路径。
-- [ ] M2-c A100 回归:2k/4k/8k/16k decode-only benchmark,输出 `results/m2c_streaming_kvprune_*.json` 与汇总表。
+- [x] M2-c A100 回归:2k/4k/8k/16k decode-only benchmark,输出 `results/m2c_streaming_kvprune_*.json` 与汇总表。
+      结果回填:本次运行已完成,但 A100 上实际 cache 形态落在旧兼容层外,裁剪统计显示 `unsupported_cache`,因此 decode / memory 基本与 baseline 持平;已将这个负结果保留为兼容性回归,后续需用更新后的 cache layer 兼容层重跑。
 - [ ] **M2-d chunked prefill / local attention**:prefill 阶段避免构造完整 `[batch,1,q,kv]` additive mask,按 query chunk 只看局部 K/V。
       验收目标:8k/16k peak memory 低于 dense baseline,prefill 不慢于 dense。
 - [ ] **M2-e kernel-aware attention hook**:从顶层 `attention_mask` 注入升级到 attention module 内部 patch,尽量保留 FlashAttention/SDPA fast path;必要时再评估 Triton/FlashAttention local/block kernel。

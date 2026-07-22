@@ -136,6 +136,25 @@ class DummyOutput:
         self.past_key_values = past_key_values
 
 
+class FakeCacheLayer:
+    def __init__(self, seq_len=10):
+        self.keys = torch.randn(1, 2, seq_len, 4)
+        self.values = torch.randn(1, 2, seq_len, 4)
+        self.cumulative_length = seq_len
+
+    def get_seq_length(self):
+        return int(self.keys.shape[-2])
+
+
+class FakeLayerCache:
+    def __init__(self, seq_len=10, layers=1):
+        self.layers = [FakeCacheLayer(seq_len=seq_len) for _ in range(layers)]
+        self._seen_tokens = seq_len
+
+    def get_seq_length(self):
+        return self.layers[0].get_seq_length() if self.layers else 0
+
+
 class KVForwardLM(nn.Module):
     def __init__(self):
         super().__init__()
@@ -183,3 +202,26 @@ def test_install_streaming_kv_pruning_forward_wrapper():
 
     restored = model(torch.randint(0, 8, (1, 1)))
     assert restored.past_key_values[0][0].shape[-2] == 10
+
+
+def test_install_streaming_kv_pruning_layers_cache():
+    class LayerCacheLM(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = nn.Linear(8, 8)
+
+        def forward(self, input_ids, past_key_values=None, use_cache=False):
+            return DummyOutput(self.proj(torch.randn(1, 1, 8)), FakeLayerCache(seq_len=10))
+
+    model = LayerCacheLM()
+    cfg = SparseConfig(mode="streaming_llm", window_size=3, sink_size=2)
+    handle = install_streaming_kv_pruning(model, cfg)
+    try:
+        out = model(torch.randint(0, 8, (1, 1)))
+        assert out.past_key_values.layers[0].keys.shape[-2] == 5
+        assert out.past_key_values.layers[0].values.shape[-2] == 5
+        assert out.past_key_values.layers[0].cumulative_length == 5
+        assert handle.last_stats is not None
+        assert handle.last_stats.applied
+    finally:
+        handle.restore()
