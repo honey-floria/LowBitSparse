@@ -108,11 +108,11 @@ def step4_gptq_vs_rtn():
 
 
 def step5_awq_vs_rtn():
-    """步骤5:AWQ 两阶段(缩放 + 裁剪搜索) vs RTN,逐级降低加权误差。"""
-    print("\n[步骤5] AWQ(激活感知缩放 + 权重裁剪搜索) vs RTN")
+    """步骤5:AWQ 激活感知缩放 vs RTN(裁剪搜索默认关,见下方说明)。"""
+    print("\n[步骤5] AWQ(激活感知逐通道缩放) vs RTN")
     torch.manual_seed(1)
     W = torch.randn(64, 256)
-    W[:, ::16] *= 6.0                      # 注入权重离群,凸显裁剪搜索的贡献
+    W[:, ::16] *= 6.0                      # 注入权重离群
     act = torch.rand(256) + 0.05
     act[:4] *= 50.0                        # 4 个超大激活通道
     cfg = QuantConfig(n_bits=3, group_size=256, symmetric=False, method="awq")
@@ -121,13 +121,14 @@ def step5_awq_vs_rtn():
         return ((W - W_dq) * act.unsqueeze(0)).pow(2).sum().item()
 
     W_rtn = fake_quant_groupwise(W, cfg.n_bits, cfg.group_size, cfg.symmetric)
-    W_scale = awq_quantize_weight(W, act, cfg, clip_search=False)  # 仅缩放
-    W_full = awq_quantize_weight(W, act, cfg, clip_search=True)    # 缩放+裁剪
-    wr, ws, wf = werr(W_rtn), werr(W_scale), werr(W_full)
-    print(f"  INT3 激活加权误差(越低越好): RTN={wr:.1f}  "
-          f"AWQ缩放={ws:.1f}  AWQ缩放+裁剪={wf:.1f}")
-    print(f"  缩放 vs RTN 降低: {(1 - ws / wr):.2%};"
-          f"裁剪再降: {(1 - wf / ws):.2%}(逐组搜最优范围收缩 α)")
+    W_scale = awq_quantize_weight(W, act, cfg)            # 默认:仅缩放
+    W_clip = awq_quantize_weight(W, act, cfg, clip_search=True)  # 裁剪(默认关)
+    wr, ws, wc = werr(W_rtn), werr(W_scale), werr(W_clip)
+    print(f"  INT3 激活加权误差(越低越好): RTN={wr:.1f}  AWQ缩放={ws:.1f}")
+    print(f"  缩放 vs RTN 降低: {(1 - ws / wr):.2%}")
+    # 裁剪:合成权重 MSE 上"看似"更优,但 M1-h A100 实测真实 PPL 全面恶化,故默认关
+    print(f"  [裁剪搜索:默认关] 合成加权误差={wc:.1f}(权重空间代理下略降,"
+          f"但真实 PPL 恶化——代理不忠实,见 OPTIMIZATION M1-h)")
 
 
 def step6_group_sweep():

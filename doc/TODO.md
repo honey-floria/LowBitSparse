@@ -121,8 +121,10 @@ LowBitSparse/
 - [x] 单元测试(round-trip 误差、位宽单调性、padding、对称路径)
 - [x] GPTQ 量化器(Hessian 校准 + 逐列误差补偿,gptq.py + calibration.py)
 - [x] AWQ 量化器(激活感知逐通道缩放网格搜索,awq.py)
-- [x] AWQ 加权重裁剪搜索(auto_clip 第二阶段,见 M1-h);CPU 验证裁剪不劣于纯缩放、离群下改善
-      **待 A100 重跑** AWQ sweep 刷新 `m1_awq_*`(现有为无裁剪旧值),更新 M1-f 的 AWQ 列。
+- [x] AWQ 权重裁剪搜索(auto_clip)— **负结果,已默认关闭**(见 M1-h)
+      A100 实测裁剪全面恶化 PPL(INT3 +17.36)。根因:权重空间 MSE 代理与 PPL 反向,
+      裁剪牺牲了低 bit 下不可牺牲的离群权重。纯缩放 AWQ 仍是正确形态。
+      ⚠️ `results/m1_awq_*.json` 现为裁剪坏值,需 `python scripts/run_sweep.py --only awq --no-emb` 重跑恢复。
 - [x] group_size 扫描(64/128/256/per-channel)+ per-channel vs per-group(run_sweep.py 网格 + 单调性测试)
 - [x] **验收**:三方法 × INT4 的 PPL 与压缩比表格(见 `results/m1_summary.md` + OPTIMIZATION 速查表)
       A100 实测结论:同压缩比 2.136x 下 GPTQ(+1.19)> AWQ(+2.07)> RTN(+2.81),GPTQ 恢复 RTN 缺口 57.7%。

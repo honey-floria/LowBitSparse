@@ -16,21 +16,26 @@ from .primitives import fake_quant_groupwise, fake_quant_groupwise_autoclip
 
 
 def awq_quantize_weight(weight: torch.Tensor, act_scales: torch.Tensor,
-                        cfg, n_grid: int = 20, clip_search: bool = True,
+                        cfg, n_grid: int = 20, clip_search: bool = False,
                         n_clip: int = 20) -> torch.Tensor:
     """用 AWQ 对单层 2D 权重做伪量化。
 
-    两阶段(对齐 AWQ 论文):
-      1) 缩放搜索:按激活幅度搜每通道保护缩放 s,最小化加权误差(保护大激活通道);
-      2) 裁剪搜索(auto_clip):在最佳缩放后的权重上,逐组搜范围收缩系数 α,
-         牺牲少数离群权重换 bulk 网格分辨率。两阶段而非联合网格,省开销。
+    阶段 1(默认,唯一启用):缩放搜索——按激活幅度搜每通道保护缩放 s,
+    最小化加权误差(保护大激活通道)。这是已在 A100 验证的好版本。
+
+    阶段 2(clip_search=True,默认关):权重裁剪搜索(auto_clip)。
+    ⚠️ M1-h A100 实测:本实现的裁剪在真实模型上全面**恶化** PPL(INT3 尤甚,
+       +17),故默认关闭。根因:autoclip 逐组最小化的是"权重空间量化 MSE"(对角
+       代理),而低 bit 下 PPL 极度依赖少数离群权重的保真——裁剪为换 bulk 分辨率
+       clamp 掉离群值,权重 MSE 降了但 PPL 崩。忠实的 auto_clip 需在校准集上按
+       "输出误差"逐候选前向搜索(未实现),权重空间代理不可靠。保留仅供研究。
 
     参数:
         weight:      [out_features, in_features] 的 Linear 权重。
         act_scales:  [in_features] 每条输入通道在校准集上的激活均值绝对值。
         cfg:         QuantConfig(用 n_bits/group_size/symmetric)。
         n_grid:      缩放 ratio 网格点数,默认 20(ratio ∈ {0, 0.05, …, 1.0})。
-        clip_search: 是否启用第 2 阶段裁剪搜索(默认 True;False 退回纯缩放 AWQ)。
+        clip_search: 是否启用第 2 阶段裁剪搜索(默认 False;见上方警告)。
         n_clip:      裁剪 α 网格点数,默认 20。
     返回:
         反量化后的权重(与 weight 同形状同 dtype)。
