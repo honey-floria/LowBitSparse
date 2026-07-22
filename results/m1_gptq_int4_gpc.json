@@ -1,0 +1,32 @@
+{
+  "exp_id": "m1_gptq_int4_gpc",
+  "env": {
+    "timestamp": "2026-07-22T02:40:55.659775+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "method": "gptq",
+    "n_bits": 4,
+    "group_size": -1
+  },
+  "size_fp16": {
+    "params": 494032768,
+    "params_millions": 494.033,
+    "bytes": 988065536,
+    "size_mb": 942.293
+  },
+  "compression": {
+    "quant_weights": 357826560,
+    "effective_bits": 4.028,
+    "size_mb": 431.578,
+    "ratio": 2.183
+  },
+  "ppl": {
+    "ppl": 17.3287,
+    "seqlen": 2048,
+    "stride": 2048,
+    "n_tokens": 299078
+  }
+}
