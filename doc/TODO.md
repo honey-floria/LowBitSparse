@@ -122,9 +122,14 @@ LowBitSparse/
 - [x] GPTQ 量化器(Hessian 校准 + 逐列误差补偿,gptq.py + calibration.py)
 - [x] AWQ 量化器(激活感知逐通道缩放网格搜索,awq.py)
 - [x] group_size 扫描(64/128/256/per-channel)+ per-channel vs per-group(run_sweep.py 网格 + 单调性测试)
-- [~] **验收**:三方法 × 多 bit 的 PPL 与压缩比表格 + 曲线
-      (代码闭环已就绪:`scripts/run_sweep.py` 跑全组合、`scripts/summarize.py` 一键出表;
-       CPU 侧逻辑已冒烟验证;**待在 Colab/A100 实跑填充 GPTQ/AWQ 与 group 扫描的实测 PPL**)
+- [x] **验收**:三方法 × INT4 的 PPL 与压缩比表格(见 `results/m1_summary.md` + OPTIMIZATION 速查表)
+      A100 实测结论:同压缩比 2.136x 下 GPTQ(+1.19)> AWQ(+2.07)> RTN(+2.81),GPTQ 恢复 RTN 缺口 57.7%。
+      遗留(转入下方,不阻塞 M1 核心结论):group_size 扫描曲线、embedding 量化消融、校准 Hessian 显存释放。
+- [x] group_size × bit 扫描实跑(INT4 g64/128/256 + RTN per-channel + INT3 g128,见 M1-f)
+      结论:group 是纯精度旋钮(压缩比恒 ~2.1x);GPTQ 对粗粒度/低 bit 鲁棒性远超 RTN;拐点 GPTQ g128。
+- [ ] 补跑 GPTQ/AWQ per-channel(RTN 已崩 +12.64,验证 GPTQ 鲁棒性边界 + 可能的高压缩可用点)
+- [ ] embedding 量化消融:评估能否把整体压缩比推到 3x+ 及 PPL 代价(唯一能破 2.4x 的方向)
+- [ ] M1 收尾优化:量化后释放 `calib_stats`(H 每层 ~94.6MB×24≈2.3GB 常驻),降低显存占用
 
 ### M2 — 稀疏注意力
 - [ ] 注意力 hook / 替换机制(不改原权重)

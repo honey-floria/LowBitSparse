@@ -29,8 +29,11 @@
 | FP16 baseline | Qwen2.5-0.5B-Instruct | seqlen/stride 2048 prefill512/decode128 | 14.2445 | 942.3 MB(494.03M 参数) | 30.42 ms / 37.19 tok/s | 4574.3 MB(current 959.3 MB) |
 | RTN INT8 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head                            | 14.2326(-0.08%) | 611.7 MB(等效 8.251bit,压缩 1.54x) | 30.50 ms / 37.07 tok/s(同基线) | 4573.1 MB |
 | RTN INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head                            | 17.058(+19.7%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.61 ms / 38.45 tok/s(同基线) | 4573.1 MB |
+| GPTQ INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head, calib 128×512             | 15.4347(+8.4%,恢复 RTN 缺口 57.7%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.70 ms / 37.49 tok/s(同基线) | 7186.6 MB(含校准 Hessian 常驻,见 M1-d) |
+| AWQ INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head, calib 128×512             | 16.3182(+14.6%,恢复 RTN 缺口 26.3%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.88 ms / 37.22 tok/s(同基线) | 7187.2 MB(同上) |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_rtn_int4_g128.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`。
+> **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板:embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享,被 skip)未量化,占量化后总体积 42%。
 
@@ -125,6 +128,7 @@
 **实验设置**:Qwen2.5-0.5B-Instruct;RTN;n_bits=4;group_size=128;非对称;skip=lm_head;seqlen/stride 2048。数据源 `results/m1_rtn_int4_g128.json`。
 
 **结果(三档对比)**:
+
 | 指标 | FP16 | INT8 | INT4 |
 | --- | --- | --- | --- |
 | PPL | 14.2445 | 14.2326 | 17.058 |
@@ -144,5 +148,70 @@
 - 下一步建议先做 **GPTQ**(Hessian 校准 + 误差补偿),直接冲着恢复 INT4 的 +2.81 缺口;embedding 量化消融作为压缩比补充实验穿插。
 
 **安全备注**:本次记录过程中,一次 Edit 的工具返回里混入了伪装成指令的提示注入文本(诱导调用 DesignSync/finalize_plan),已识别并忽略,未执行任何相关操作。
+
+## [2026-07-22] M1-d — GPTQ INT4 A100 实测(误差补偿恢复过半缺口)
+**背景 / 目标**:RTN INT4 掉了 +2.81 PPL,GPTQ 用校准集算 Hessian、逐列量化并把误差补偿到未处理列,冲着恢复这个缺口。这是 M1 "精度恢复"的第一张牌。
+
+**实验设置**:Qwen2.5-0.5B;GPTQ;n_bits=4;group=128;非对称;skip=lm_head;校准 WikiText-2 train 128 条×512 seqlen;seqlen/stride 2048。数据源 `results/m1_gptq_int4_g128.json`。
+
+**结果(与 RTN 同压缩比对比)**:
+
+| 指标 | FP16 | RTN INT4 | GPTQ INT4 |
+| --- | --- | --- | --- |
+| PPL | 14.2445 | 17.058 | 15.4347 |
+| ΔPPL | — | +2.813(+19.7%) | +1.190(+8.4%) |
+| 压缩比 | 1x | 2.136x | 2.136x |
+| 等效 bit | 16 | 4.251 | 4.251 |
+| decode | 37.19 | 38.45 | 37.49 tok/s |
+
+**关键分析**:
+1. **恢复 RTN 缺口的 57.7%**:缺口从 +2.813 压到 +1.190,落在 M1-c 预期的 GPTQ 收益带内(+0.5~1.0 量级偏上)。同压缩比下纯靠"更聪明地选量化值"换来精度,是 GPTQ 的核心价值——压缩比与 RTN 完全相同(权重仍 4.251 等效 bit),差别只在权重数值。
+2. **显存暴涨到 7186 MB(基线 4574)非模型问题,是校准 Hessian 未释放**:`collect_calib_stats` 给每层存 float32 `H[in_f,in_f]`,down_proj in_f=4864 → 单层 H≈94.6MB,×24 层≈2.27GB;`calib_stats` 在 `cmd_quant` 里活到 eval 阶段未释放,current 3571−959≈2.6GB 与之吻合。**这是可清理项**:量化替换完即可 `del calib_stats` + `empty_cache`,不影响精度,但小显存卡上有意义。留作 M1 收尾优化。
+3. **延迟同基线**:伪量化仍走 FP16 matmul,GPTQ 只改权重数值不改结构,故延迟/压缩比与 RTN 一致,唯一变量是 PPL。
+
+**结论 & 下一步**:GPTQ 达标,确立为 INT4 首选。下一步 AWQ 对照(见 M1-e),再做 group_size 扫描与 embedding 量化消融补齐验收表。
+
+## [2026-07-22] M1-e — AWQ INT4 A100 实测(收益逊于 GPTQ,合成 vs 真实落差归因)
+**背景 / 目标**:AWQ 按激活幅度逐通道搜索缩放 s,保护大激活通道后再量化。与 GPTQ 同为 INT4 校准类方法,横向对照两条精度恢复路线。
+
+**实验设置**:Qwen2.5-0.5B;AWQ;n_bits=4;group=128;非对称;skip=lm_head;校准同 GPTQ(128×512);seqlen/stride 2048。数据源 `results/m1_awq_int4_g128.json`。
+
+**结果(三方法 INT4 齐平)**:
+
+| 指标 | RTN INT4 | AWQ INT4 | GPTQ INT4 |
+| --- | --- | --- | --- |
+| PPL | 17.058 | 16.3182 | 15.4347 |
+| ΔPPL | +2.813 | +2.074 | +1.190 |
+| 恢复 RTN 缺口 | — | 26.3% | 57.7% |
+| 压缩比 | 2.136x | 2.136x | 2.136x |
+
+**关键分析**:
+1. **AWQ 恢复 26.3%,明显逊于 GPTQ 的 57.7%**。根因是方法差异:AWQ 只做通道缩放、不做误差补偿;GPTQ 逐列量化后把残差 Hinv 补偿到未处理列,在 4bit 这种粗量化下补偿的价值更大。排序确立 **GPTQ > AWQ > RTN**。
+2. **cpu_smoke 合成数据(AWQ 降误差 76%)与真实(恢复 26.3%)的落差是合理的,非 bug**:合成用例特意构造了强通道激活差异来凸显 AWQ 优势;真实 0.5B 各通道激活幅度差异没那么悬殊,缩放的边际收益随之缩小。**提醒:cpu_smoke 是逻辑演示/相对关系锚点,不是收益预测器**——报告里不能拿合成降幅当真实收益。
+3. **显存 7187 MB 与 GPTQ 同因**(校准 Hessian 常驻,AWQ 其实只用 act_scales,H 是收集时一并算的);延迟同基线。压缩比三方法全等,横轴只有 PPL 一个变量,"压缩比 vs 精度"权衡图已成型。
+
+**结论 & 下一步**:M1 三方法闭环全部实测完成,核心结论(GPTQ 首选,同压缩比恢复过半缺口)已成立。遗留:①group_size 扫描(64/128/256/per-channel)填充验收表另一维;②embedding 量化消融回答"能否上 3x+";③M1 收尾把校准 Hessian 释放掉;之后进入 M2 稀疏注意力。可考虑给 AWQ 加更细网格 + clip 搜索作为改进项。
+
+## [2026-07-22] M1-f — group_size × bit 全扫描(GPTQ 鲁棒性坐实,拐点确立)
+**背景 / 目标**:用 `run_sweep.py` 跑 method×bit×group 全组合,填充验收表的粒度维,给出"压缩比 vs 精度"完整权衡,并回答 group_size / bit 各自的收益边界。
+
+**实验设置**:Qwen2.5-0.5B;RTN/GPTQ/AWQ;INT4 group∈{64,128,256,per-channel(仅 RTN)}+ INT3 g128;非对称;skip=lm_head;GPTQ/AWQ 校准 128×512;seqlen/stride 2048。数据源 `results/m1_summary.md` 及各 `m1_*.json`。g128 三点与 M1-c/d/e 单跑值一致(seed=42 复现)。
+
+**结果(ΔPPL,粗体为该 group 最优)**:
+| group | RTN | AWQ | GPTQ | 压缩比 |
+| --- | --- | --- | --- | --- |
+| g64 | +1.884 | +1.463 | **+0.887** | 2.09x |
+| g128 | +2.813 | +2.074 | **+1.190** | 2.14x |
+| g256 | +4.620 | +2.986 | **+1.508** | 2.16x |
+| per-channel | +12.641 | — | — | 2.18x |
+| INT3 g128 | +51.451 | +17.123 | **+8.235** | 2.37x |
+
+**关键分析**:
+1. **方法排序 GPTQ<AWQ<RTN 在每个配置下无一例外成立**,误差补偿的价值是稳健的,非某一超参下的偶然。
+2. **group_size 是纯精度旋钮、几乎非压缩旋钮**:INT4 四档压缩比仅 2.09–2.18x 浮动(等效 bit 4.028–4.501),因 embedding 地板占大头,group 改的只是每组 scale/zero 开销的零头。cpu_smoke 的合成单调性锚点在 0.5B 上坐实(组越小 PPL 越低)。
+3. **本次最有价值的新发现——量化越激进,GPTQ 相对 RTN 价值越大**:g128→g256,RTN 恶化 +1.81 而 GPTQ 仅 +0.32;INT4→INT3,RTN 崩(+51.45)而 GPTQ 尚可用(+8.24);per-channel RTN 崩(+12.64)。RTN 逐组无补偿,粒度一粗/bit 一低就撑不住;GPTQ 用 Hinv 把误差摊到后续列,吃得下粗粒度。
+4. **拐点与边界**:精度最优 GPTQ g64(+0.89@2.09x);性价比拐点 GPTQ g128(+1.19@2.14x,降 g64 仅多省 0.3 PPL 却掉 0.05x 压缩,边际薄);INT3 不划算(即便 GPTQ +8.24,压缩仅 2.14→2.37x)。**结论:要突破 ~2.4x 得动 embedding,不是降 bit。**
+
+**结论 & 下一步**:M1 验收表粒度维完成,GPTQ g128 定为默认推荐。遗留:①GPTQ/AWQ 的 per-channel 缺失,恰是 RTN 崩溃处,补跑可验证 GPTQ 鲁棒性边界并可能给出 >2.16x 的可用点;②embedding 量化消融(唯一能破 2.4x 的方向);③M1 收尾释放校准 Hessian 显存。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

@@ -27,10 +27,12 @@ BASE_GRID = [
     ("gptq",  4,  64,   False),
     ("gptq",  4,  128,  False),
     ("gptq",  4,  256,  False),
+    ("gptq",  4,  -1,   False),   # per-channel
     ("gptq",  3,  128,  False),
     ("awq",   4,  64,   False),
     ("awq",   4,  128,  False),
     ("awq",   4,  256,  False),
+    ("awq",   4,  -1,   False),   # per-channel
     ("awq",   3,  128,  False),
 ]
 
