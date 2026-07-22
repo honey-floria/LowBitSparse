@@ -55,62 +55,51 @@ def _apply_past_pruner(past, past_pruner):
     return result, None
 
 
-def _try_build_cudagraph_decode(model, prefill_len, decode_tokens, device):
-    """尝试手动捕获单步 decode 的 CUDA graph(M2-e overhead 验证)。
+def _probe_forward_scaling(model, device, lengths=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512),
+                           warmup: int = 2, repeats: int = 5):
+    """探针:单次 forward 延迟随输入长度的变化,判定 decode 是否 overhead-bound。
 
-    背景:当前 eager 逐 token decode 是 overhead-bound —— 0.5B 在 A100 上纯带宽
-    理论 ~0.66ms/step,实测 ~27ms/step,40x 差距来自每步的 kernel launch / Python
-    循环固定开销,而非 KV attention。要验证这个判断,就消除逐步 launch overhead。
+    背景:当前 eager 逐 token decode 疑似 overhead-bound —— 处理 2048 token 的 prefill
+    (~32ms,每 token ~0.016ms)与处理 1 token 的 decode(~27ms)几乎同量级,相差近
+    1700x。若一次 forward 的成本几乎与 token 数无关,则固定开销(kernel launch / Python
+    调度)主导,而非每 token 的计算/带宽。
 
-    为什么手动捕获而非 torch.compile(reduce-overhead):后者的 CUDA graphs 会被
-    transformers cache `update()` 里的原地 `cumulative_length.add_()` 判定为
-    "mutated inputs" 而自动跳过(实测 72 instances,overhead 没被消除)。手动
-    `torch.cuda.graph` 捕获允许对固定 buffer 原地 mutate,不受此限,且正是 M2-e
-    ring-buffer 要用的原语。
+    做法:用 `use_cache=False` 跑单次 forward,输入长度从 1 扫到 512,量每档中位延迟。
+    - 小长度区间延迟基本持平 → overhead 地板主导,overhead-bound 坐实,L=1 延迟≈地板;
+    - 延迟明显抬头的拐点 = compute/带宽开始接管处。
 
-    做法:StaticCache 固定形状 → prefill 填一次 → 固定单步输入 buffer → side-stream
-    warmup(捕获前必需)→ 捕获一次 decode step。这是"overhead 上限"探针:replay 同
-    一张 graph,固定输入、不更新 token,只测消除 launch 开销后单步的纯执行时间(每步
-    计算量恒定,故 replay 合理)。不追求生成正确性。任何一步失败返回 `{"error": ...}`。
+    这条探针只调标准 forward,无 StaticCache / CUDA graph / cache 原地写,不可能触发
+    device-side assert,不会把整个 benchmark 带崩(之前的 cudagraph 探针两次失败:
+    compile 跳过 cudagraph、StaticCache index_copy_ 越界 device-assert,故弃用)。
     """
     if not str(device).startswith("cuda"):
-        return None  # CUDA graph 只在 GPU 有意义
+        return {"available": False, "reason": "not_cuda"}
     try:
-        from transformers import StaticCache
-    except Exception:
-        return None
-    try:
-        max_len = prefill_len + decode_tokens + 1
-        dtype = next(model.parameters()).dtype
         vocab = model.config.vocab_size
-        # 固定形状 KV cache:decode 全程不 resize,满足 CUDA graph 前提。
-        static_cache = StaticCache(
-            config=model.config, max_batch_size=1, max_cache_len=max_len,
-            device=device, dtype=dtype)
-        # prefill 一次,把 cache 填到 prefill_len(graph 只捕获之后的单步 decode)。
-        prefill_ids = torch.randint(0, vocab, (1, prefill_len), device=device)
-        prefill_pos = torch.arange(prefill_len, device=device, dtype=torch.long)
-        model(prefill_ids, use_cache=True, past_key_values=static_cache,
-              cache_position=prefill_pos)
-        # 固定的单步 decode 输入 buffer(地址固定,graph 捕获/replay 复用同一块)。
-        static_input = torch.randint(0, vocab, (1, 1), device=device)
-        static_cpos = torch.tensor([prefill_len], device=device, dtype=torch.long)
-        # 捕获前必须在 side stream 上 warmup,完成 lazy init / autotune。
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            for _ in range(3):
-                model(static_input, use_cache=True, past_key_values=static_cache,
-                      cache_position=static_cpos)
-        torch.cuda.current_stream().wait_stream(s)
-        # 捕获单步 decode。
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            model(static_input, use_cache=True, past_key_values=static_cache,
-                  cache_position=static_cpos)
-        return graph, max_len
+        points = []
+        for L in lengths:
+            ids = torch.randint(0, vocab, (1, L), device=device)
+            times = []
+            for i in range(warmup + repeats):
+                _sync(device)
+                t0 = time.perf_counter()
+                model(ids, use_cache=False)
+                _sync(device)
+                t1 = time.perf_counter()
+                if i >= warmup:
+                    times.append(t1 - t0)
+            points.append({"len": L, "ms_median": round(statistics.median(times) * 1e3, 4)})
+        floor = points[0]["ms_median"]                       # L=1 延迟 ≈ overhead 地板
+        top = points[-1]["ms_median"]                        # 最大长度延迟
+        return {
+            "available": True,
+            "points": points,
+            "overhead_floor_ms": floor,
+            # L=1 到最大长度的延迟放大倍数;接近 1 = 全是固定 overhead(强 overhead-bound)。
+            "ratio_maxlen_over_len1": round(top / max(floor, 1e-9), 3),
+        }
     except Exception as e:   # noqa: BLE001 — 探针,任何失败都降级并记录原因
-        return {"error": repr(e)}
+        return {"available": False, "reason": repr(e)}
 
 
 @torch.no_grad()   # 性能测试无需梯度
@@ -124,13 +113,12 @@ def profile_latency(
     device: str = None,          # 设备,None 取模型所在设备
     past_pruner=None,            # 可选:M2-c KV cache 裁剪回调
     reset_peak_after_prefill: bool = False,  # 可选:只统计 decode 阶段峰值显存
-    compile_decode: bool = False,  # 可选:M2-e 验证,手动 CUDA graph 单步 decode(量 overhead 上限)
+    compile_decode: bool = False,  # 可选:M2-e 验证,forward 延迟 vs 输入长度扫描(判 overhead-bound)
 ) -> dict:
     """测量 prefill 延迟与 decode 吞吐,均取中位数以抵抗抖动。
 
-    `compile_decode=True` 时额外测一条 torch.compile + StaticCache 的无裁剪 decode,
-    用来验证 decode 是否 overhead-bound(见 `_try_build_static_decode`)。该分支与
-    `past_pruner` 互斥(static cache 形状固定,不能每步裁剪),结果写入 `compiled_decode`。
+    `compile_decode=True` 时额外跑一条 forward 延迟 vs 输入长度扫描,用来判定 decode
+    是否 overhead-bound(见 `_probe_forward_scaling`),结果写入 `forward_scaling`。
     """
     if device is None:
         device = next(model.parameters()).device
@@ -199,42 +187,15 @@ def profile_latency(
             "reset_peak_after_prefill": reset_peak_after_prefill,
         }
 
-    # ---- 可选:M2-e 验证分支,torch.compile + StaticCache 无裁剪 decode ----
-    # 目的是量出消除逐步 overhead 后 decode 的吞吐上限,与上面的 eager decode 对比。
-    # 若 compile 后 tok/s 大幅跳升,则坐实 decode 为 overhead-bound(而非 KV-bound),
-    # 固定大小 ring-buffer KV cache 值得做;若几乎不变,则瓶颈另有其处。
+    # ---- 可选:M2-e 验证分支,forward 延迟 vs 输入长度扫描 ----
+    # 目的:判定 decode 是否 overhead-bound。若小长度区间 forward 延迟基本持平
+    # (1 token 与 128 token 几乎同速),则固定 overhead(kernel launch / Python 调度)
+    # 主导 → overhead-bound 坐实,固定大小 ring-buffer KV cache(M2-e)值得做;
+    # 若延迟随长度近似线性上升,则已是 compute/带宽-bound,ring-buffer 无助于 decode。
+    # 注:这条只调标准 forward,不会触发 device-assert 或带崩 benchmark。
     if compile_decode:
-        built = _try_build_cudagraph_decode(model, prefill_len, decode_tokens, device)
-        if built is None:
-            result["compiled_decode"] = {
-                "available": False,
-                "reason": "not_cuda_or_static_cache_unavailable",
-            }
-        elif isinstance(built, dict):   # 捕获过程抛错,记录原因
-            result["compiled_decode"] = {"available": False, "reason": built["error"]}
-        else:
-            graph, max_len = built
-            graph_tps = []
-            for i in range(warmup + repeats):
-                # replay 同一张 graph decode_tokens 次;每步计算量恒定,只测
-                # 消除 launch overhead 后的单步纯执行时间(不追求 token 正确性)。
-                _sync(device)
-                t2 = time.perf_counter()
-                for _ in range(decode_tokens):
-                    graph.replay()
-                _sync(device)
-                t3 = time.perf_counter()
-                if i >= warmup:
-                    graph_tps.append(decode_tokens / (t3 - t2))
-            result["compiled_decode"] = {
-                "available": True,
-                "method": "manual_cudagraph_replay",
-                "decode_tps_median": round(statistics.median(graph_tps), 2),
-                "max_cache_len": max_len,
-                "speedup_vs_eager": round(
-                    statistics.median(graph_tps)
-                    / max(result["decode_tps_median"], 1e-6), 3),
-            }
+        result["forward_scaling"] = _probe_forward_scaling(
+            model, device, warmup=warmup, repeats=repeats)
 
     return result
 
