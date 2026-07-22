@@ -48,6 +48,10 @@ def main():
     ap.add_argument("--decode", type=int, default=128)
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--repeats", type=int, default=5)
+    ap.add_argument("--ring", action="store_true",
+                    help="用 RingKVCache(固定 sink+window)走 M2-e 路径,验证不崩/显存恒定")
+    ap.add_argument("--sink", type=int, default=64)
+    ap.add_argument("--window", type=int, default=1024)
     args = ap.parse_args()
 
     import torch
@@ -63,6 +67,25 @@ def main():
     print(f"  device={device} dtype={dtype} vocab={vocab}")
     if not str(device).startswith("cuda"):
         print("  [SKIP] 非 cuda 设备,CUDA graph 无意义")
+        return
+
+    # --- M2-e ring-buffer 路径(先行门控):固定 sink+window,验证不崩/显存恒定/~3x ---
+    if args.ring:
+        _stage(f"RING. build_ring_graph_decode sink={args.sink} window={args.window}")
+        from lowbitsparse.sparse.ring_cache import build_ring_graph_decode
+        res = build_ring_graph_decode(
+            model, sink_size=args.sink, window_size=args.window,
+            prefill_len=args.prefill, decode_tokens=args.decode,
+            warmup=args.warmup, repeats=args.repeats, device=device)
+        print(f"  {res}")
+        if res.get("available"):
+            tps = res["decode_tps_median"]
+            print(f"\n[RESULT-RING] eager ~37 tok/s → ring+graph {tps:.1f} tok/s "
+                  f"(提速 ~{tps/37:.1f}x), decode peak {res['decode_peak_mb']}MB, "
+                  f"cache_len={res['cache_len']}(恒定)")
+            print("  若不崩 + 提速显著 + 显存恒定,则 ring-buffer M2-e 可行,可进 benchmark 集成。")
+        else:
+            print(f"\n[RESULT-RING] 不可用:{res.get('reason')}")
         return
 
     # --- STAGE 1: StaticCache 能否构造 ---
