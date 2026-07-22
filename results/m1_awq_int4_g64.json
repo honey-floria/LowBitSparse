@@ -1,7 +1,7 @@
 {
   "exp_id": "m1_awq_int4_g64",
   "env": {
-    "timestamp": "2026-07-22T02:07:38.564072+00:00",
+    "timestamp": "2026-07-22T07:18:17.916402+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
@@ -9,7 +9,8 @@
   "config": {
     "method": "awq",
     "n_bits": 4,
-    "group_size": 64
+    "group_size": 64,
+    "embedding_bits": null
   },
   "size_fp16": {
     "params": 494032768,
@@ -24,7 +25,7 @@
     "ratio": 2.086
   },
   "ppl": {
-    "ppl": 15.7071,
+    "ppl": 16.0458,
     "seqlen": 2048,
     "stride": 2048,
     "n_tokens": 299078
