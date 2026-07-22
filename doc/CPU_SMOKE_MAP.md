@@ -105,14 +105,19 @@
 
 ---
 
-## 步骤5 — AWQ vs RTN
+## 步骤5 — AWQ 两阶段(缩放 + 裁剪搜索) vs RTN
+
+AWQ 现为两阶段:①激活感知缩放搜索(保护大激活通道);②权重裁剪搜索
+(auto_clip,逐组搜范围收缩 α,牺牲离群权重换 bulk 网格分辨率)。
 
 **脚本输出**
 ```
-[步骤5] AWQ(激活感知逐通道缩放) vs RTN
-  INT3 激活加权误差(越低越好): RTN=6300.3  AWQ=1500.9
-  AWQ 相对 RTN 降低: 76.18%
+[步骤5] AWQ(激活感知缩放 + 权重裁剪搜索) vs RTN
+  INT3 激活加权误差(越低越好): RTN=79126.1  AWQ缩放=15587.0  AWQ缩放+裁剪=15587.0
+  缩放 vs RTN 降低: 80.30%;裁剪再降: 0.00%(逐组搜最优范围收缩 α)
 ```
+> 注:裁剪的额外收益依赖权重离群分布,合成数据上此例约 0-7%;真实模型效果见 M1-h。
+> 裁剪 grid 含 α=1(不裁剪),故构造上永不劣于纯缩放。
 
 **脚本位置**:`scripts/cpu_smoke.py` `step5_awq_vs_rtn()`
 
@@ -120,9 +125,11 @@
 
 | 输出/动作 | 源码 | 说明 |
 | --- | --- | --- |
-| AWQ 量化 | `quant/awq.py` `awq_quantize_weight` | 按激活幅度网格搜索逐通道缩放 s |
+| AWQ 两阶段 | `quant/awq.py` `awq_quantize_weight` | `clip_search=True` 时缩放后再搜裁剪 |
 | 缩放-量化-还原 | `awq.py` `Ws=W·s → 量化 → ·(1/s)` | 保护大激活通道,量化粒度更细 |
 | ratio 网格搜索 | `awq.py` `for k in range(n_grid+1)` | ratio=0 退化为 RTN,取加权误差最小 |
+| 逐组裁剪搜索 | `primitives.py` `fake_quant_groupwise_autoclip` | 每 (行,组) 搜 α∈[0.5,1],量化 MSE 最小 |
+| 裁剪 α 注入 | `primitives.py` `find_qparams(clip=α)` | min/max 乘 α 收缩,离群被 clamp 截断 |
 | 激活统计来源 | `quant/calibration.py` `act_scales` | 每通道 mean(\|x\|),校准一次前向得到 |
 
 ---

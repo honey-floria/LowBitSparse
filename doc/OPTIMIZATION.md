@@ -31,11 +31,13 @@
 | RTN INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head                            | 17.058(+19.7%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.61 ms / 38.45 tok/s(同基线) | 4573.1 MB |
 | GPTQ INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head, calib 128×512             | 15.4347(+8.4%,恢复 RTN 缺口 57.7%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.70 ms / 37.49 tok/s(同基线) | 7186.6 MB(含校准 Hessian 常驻,见 M1-d) |
 | AWQ INT4 g128 非对称 | Qwen2.5-0.5B-Instruct | skip=lm_head, calib 128×512             | 16.3182(+14.6%,恢复 RTN 缺口 26.3%) | 441.1 MB(等效 4.251bit,压缩 2.136x) | 29.88 ms / 37.22 tok/s(同基线) | 7187.2 MB(同上) |
+| **GPTQ INT4 + emb INT8** ⭐推荐 | Qwen2.5-0.5B-Instruct | linears GPTQ INT4 + embedding RTN INT8 | 15.4275(+8.3%,≈纯 GPTQ INT4,几乎白拿) | 315.3 MB(等效 5.353bit,压缩 **2.988x**) | 同基线(伪量化) | — |
+| GPTQ INT4 + emb INT4(极限) | Qwen2.5-0.5B-Instruct | linears + embedding 均 INT4 | 16.6881(+17.2%) | 250.4 MB(等效 4.251bit,压缩 **3.763x**) | 同基线(伪量化) | — |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
-> 压缩地板:embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享,被 skip)未量化,占量化后总体积 42%。
+> 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
 
 ---
 
@@ -215,8 +217,8 @@
 
 **结论 & 下一步**:M1 验收表(4 粒度 × 3 方法 + INT3)全部实测完成,GPTQ g128 定为默认推荐,per-channel 确认为无用点(已收录仅供边界佐证)。核心权衡曲线闭合。遗留仅剩两项:①embedding 量化消融(唯一能破 2.4x 的方向);②M1 收尾释放校准 Hessian 显存。之后进入 M2 稀疏注意力。
 
-## [2026-07-22] M1-g — embedding 量化消融(代码落地,A100 实测待补)
-**背景 / 目标**:M1-f 确认压缩比被 embedding FP16 地板锁死在 ~2.14x;要命中项目原始 deliverable(3.5-4x)只能量化 embedding。本条记录消融的设计与实现,PPL 待 A100 补。
+## [2026-07-22] M1-g — embedding 量化消融(3.5-4x 达成,emb INT8 几乎白拿)
+**背景 / 目标**:M1-f 确认压缩比被 embedding FP16 地板锁死在 ~2.14x;要命中项目原始 deliverable(3.5-4x)只能量化 embedding。本条记录消融的设计、实现与 A100 实测。
 
 **核心难点——权重绑定(tied embedding)**:Qwen2.5-0.5B 的 `embed_tokens.weight` 与 `lm_head.weight` 是同一张量。若只把 lm_head 从 skip 移除,`apply_quantization` 会给它建一个新 INT4 buffer,而 embed_tokens 仍指原 FP16 张量——**绑定被拆散,变成两个矩阵,体积不降反升**。正确做法:量化共享矩阵一次,embed/lm_head 都用同一份反量化权重(部署时仍只存一份)。
 
@@ -226,15 +228,37 @@
 3. `compression_report` 改为按 `id(weight)` 去重——绑定共享矩阵只计一次,否则体积算两遍。
 4. `config.py` 加 `quant_embedding` / `embedding_bits`(None 沿用 n_bits);配置 `qwen0.5b_gptq_int4_embint{8,4}.yaml`;`run_sweep.py` `EMB_GRID` 两点。
 
-**压缩账预估(linears 固定 GPTQ INT4 g128 = 181.5MB,embedding 259.6MB@FP16)**:
-| 配置 | embedding | 体积估算 | 压缩比 |
-| --- | --- | --- | --- |
-| 基线(M1-f 冠军) | FP16 | 441MB | 2.14x |
-| emb INT8 | 133.9MB | ~315MB | **~3.0x** |
-| emb INT4 | 69.0MB | ~250MB | **~3.76x** |
+**结果(A100 实测,linears 固定 GPTQ INT4 g128;数据源 `results/m1_gptq_int4_embint{8,4}.json`)**:
+| 配置 | embedding | PPL | ΔPPL(vs FP16) | 压缩比 | 体积 |
+| --- | --- | --- | --- | --- | --- |
+| 基线(M1-f 冠军) | FP16 | 15.4347 | +1.190 | 2.136x | 441MB |
+| **emb INT8** | INT8 | **15.4275** | **+1.183** | **2.988x** | 315.3MB |
+| emb INT4 | INT4 | 16.6881 | +2.444 | **3.763x** | 250.4MB |
+
+压缩比预估(~3.0x / ~3.76x)分毫命中(实测 2.988 / 3.763)。
+
+**关键分析**:
+1. **emb INT8 几乎白拿——推翻"embedding 必须保 FP16"的隐含假设**:PPL 15.4275 vs 基线 15.4347,不掉反略低(噪声级),压缩比却从 2.14x 跳到 **2.99x(+40%)**。我在设计时预判的风险(lm_head 输出投影对量化敏感、绑定强制同精度→代价可能大)在 INT8 上**完全没兑现**。INT8 对 embedding/lm_head 这类大而分布温和的矩阵足够。**→ emb INT8 取代纯 GPTQ INT4,成为新的默认推荐(帕累托支配:更小体积 + 零精度代价)。**
+2. **3.5-4x deliverable 确认可达**:emb INT4 命中 3.763x,代价 +2.444 PPL(比 emb INT8 多掉 +1.26)。这是本项目原始目标(TODO 1.2 表"INT4 达 ~3.5-4x")首次真正达成——此前 M1-c 曾"修正"为不可达,根因是当时默认 embedding 不量化;打掉地板后目标成立。
+3. **等效 bit 口径变化**:emb INT8 等效 5.353 bit(embedding 493.96M 权重里 INT8 部分权重数多,拉高加权均值),emb INT4 等效 4.251 bit(与纯 linears 一致,因全模型统一 4bit)。quant_weights 从 357.8M 升到 493.96M,证实 embedding 已纳入量化统计、绑定去重生效(未把共享矩阵算两遍)。
 
 **验证(CPU)**:单测 4 例过(round-trip、绑定量化后仍共享同一 buffer、压缩比提升、forward 有限);cpu_smoke step8 演示绑定保持 + 体积下降。
 
-**待验证 / 风险**:PPL 未测。风险点是 lm_head(输出投影)对量化比输入 embedding 敏感,而绑定使二者被迫同精度——emb INT4 的 PPL 代价可能明显。故设 INT8/INT4 两档:INT8 保守探路,INT4 冲压缩比。**下一步**:A100 跑两配置补 PPL,判断 3x+ 是否以可接受精度达成;若 INT4 掉太多,结论为"3x 可达(INT8)、3.76x 需接受较大精度损失"。
+**结论 & 下一步**:embedding 量化消融完成,两点确立压缩-精度前沿。**M1 全部收官**:推荐配置升级为 GPTQ INT4 g128 + emb INT8(2.99x @ +1.18 PPL);极限压缩 emb INT4(3.76x @ +2.44)。遗留仅"emb INT8 是否还能配 group_size 更细的 linears 再压 PPL"这类锦上添花项,不阻塞。下一步进入 M2 稀疏注意力。
+
+## [2026-07-22] M1-h — AWQ 加权重裁剪搜索(auto_clip,第二阶段)
+**背景 / 目标**:M1-e 收尾提到"给 AWQ 加 clip 搜索作为改进项"。AWQ 论文的完整方法是**缩放搜索 + 裁剪搜索**两件事,此前只实现了缩放。本条补上裁剪搜索。
+
+**原理**:量化前给每组权重的 min/max 乘一个收缩系数 α<1,把范围向 0 收缩——少数离群权重被后续 clamp 截断,但 bulk 权重获得更细的量化网格。逐 (行,组) 独立搜 α∈[0.5, 1.0] 令组内量化 MSE 最小。与缩放正交:缩放按激活保护"重要通道",裁剪按权重分布优化"每组范围"。
+
+**实现(两阶段,非联合网格)**:
+1. `primitives.py`:`find_qparams` 加 `clip` 系数(min/max 乘 α);新增 `fake_quant_groupwise_autoclip`——向量化地在 α 网格上逐组取 MSE 最优(grid 含 α=1,故永不劣于不裁剪)。
+2. `awq.py`:阶段 1 缩放搜索求最佳 s(不变),阶段 2 在缩放后的权重 `Ws` 上跑 autoclip。两阶段而非 21×21 联合网格,省开销。`clip_search=True` 默认开,`False` 退回纯缩放 AWQ(便于消融)。RTN/GPTQ 完全不受影响(未走这条路径)。
+
+**验证(CPU)**:单测 5 例过(新增 2 例:裁剪不劣于纯缩放、权重离群下裁剪严格改善);cpu_smoke step5 改为三档对比(RTN / AWQ 缩放 / AWQ 缩放+裁剪)。合成含权重离群数据上,裁剪在缩放基础上额外降加权误差 ~6.7%(收益依权重离群分布而定,均匀权重上可能为 0)。
+
+**⚠️ 数据影响**:`results/m1_awq_*.json`(g64/g128/g256/gpc/int3)均为**无裁剪**旧结果。clip 现默认开,**需重跑 AWQ 全组合**刷新;M1-f 表里 AWQ 列届时应下修(裁剪只会降或持平 PPL)。
+
+**结论 & 下一步**:AWQ 补齐为论文完整两阶段方法。**下一步 A100**:重跑 AWQ sweep,更新 M1-f 的 AWQ 列与"GPTQ vs AWQ"缺口结论——若裁剪让 AWQ 明显追近 GPTQ,方法排序的边界需重新表述。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

@@ -23,7 +23,7 @@
 ### 1.2 核心产出(Deliverables)
 | 类别 | 指标 | 目标(0.5B 为主,1.5B 验证) |
 | --- | --- | --- |
-| 压缩比 | 模型体积 / 平均比特数 | INT4 达到 ~3.5-4x 体积压缩 |
+| 压缩比 | 模型体积 / 平均比特数 | INT4 达到 ~3.5-4x 体积压缩 ✅ 达成(emb INT4 3.76x;emb INT8 2.99x 零精度代价,见 M1-g) |
 | 精度 | WikiText-2 PPL、下游任务 | INT4 PPL 退化 < 1.0(蒸馏后) |
 | 加速比 | 长序列 prefill / decode 延迟 | 稀疏注意力 8k+ 序列 ≥ 1.5x |
 | 恢复曲线 | 蒸馏 step vs PPL | 恢复 RTN-INT4 损失的 ≥ 60% |
@@ -121,6 +121,8 @@ LowBitSparse/
 - [x] 单元测试(round-trip 误差、位宽单调性、padding、对称路径)
 - [x] GPTQ 量化器(Hessian 校准 + 逐列误差补偿,gptq.py + calibration.py)
 - [x] AWQ 量化器(激活感知逐通道缩放网格搜索,awq.py)
+- [x] AWQ 加权重裁剪搜索(auto_clip 第二阶段,见 M1-h);CPU 验证裁剪不劣于纯缩放、离群下改善
+      **待 A100 重跑** AWQ sweep 刷新 `m1_awq_*`(现有为无裁剪旧值),更新 M1-f 的 AWQ 列。
 - [x] group_size 扫描(64/128/256/per-channel)+ per-channel vs per-group(run_sweep.py 网格 + 单调性测试)
 - [x] **验收**:三方法 × INT4 的 PPL 与压缩比表格(见 `results/m1_summary.md` + OPTIMIZATION 速查表)
       A100 实测结论:同压缩比 2.136x 下 GPTQ(+1.19)> AWQ(+2.07)> RTN(+2.81),GPTQ 恢复 RTN 缺口 57.7%。
@@ -129,11 +131,9 @@ LowBitSparse/
       结论:group 是纯精度旋钮(压缩比恒 ~2.1x);GPTQ 对粗粒度/低 bit 鲁棒性远超 RTN;拐点 GPTQ g128。
 - [x] 补跑 GPTQ/AWQ per-channel(见 M1-f 补充)
       结论:GPTQ +3.08 / AWQ +6.32 / RTN +12.64;GPTQ 恢复比例随粒度变粗单调升至 75.6%;但 per-channel 纯亏精度不换体积(2.18x vs g256 2.16x),确认为无用点。
-- [~] embedding 量化消融:评估能否把整体压缩比推到 3x+ 及 PPL 代价(唯一能破 2.4x 的方向)
-      代码已落地:`FakeQuantEmbedding` + apply.py 绑定感知替换(embed/lm_head 共享 w_dq)+
-      compression_report 按 id 去重;config 加 `quant_embedding`/`embedding_bits`;
-      配置 `qwen0.5b_gptq_int4_embint{8,4}.yaml`;run_sweep `EMB_GRID`;单测 4 例过;cpu_smoke step8。
-      **待 A100 实跑**填 PPL:预估 emb INT8 ~3.0x、emb INT4 ~3.76x(见 OPTIMIZATION M1-g 设计)。
+- [x] embedding 量化消融:破 2.4x 地板(见 M1-g)
+      实测:emb INT8 = 2.99x @ PPL 15.43(≈纯 GPTQ INT4,几乎白拿);emb INT4 = 3.76x @ PPL 16.69。
+      结论:emb INT8 帕累托支配纯 GPTQ INT4,升级为默认推荐;3.5-4x deliverable 达成。
 - [x] M1 收尾优化:量化后释放 `calib_stats`(`free_calib_stats`,main.py/run_sweep.py 评测前调用;cpu_smoke step7 演示)
       代码已落地并 CPU 验证;GPU 峰值应从 ~7187MB 回落到接近基线 4574MB,待下次 A100 跑确认。
 

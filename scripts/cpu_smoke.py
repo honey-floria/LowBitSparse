@@ -108,20 +108,26 @@ def step4_gptq_vs_rtn():
 
 
 def step5_awq_vs_rtn():
-    """步骤5:AWQ 按激活幅度保护重要通道,激活悬殊时加权误差低于 RTN。"""
-    print("\n[步骤5] AWQ(激活感知逐通道缩放) vs RTN")
+    """步骤5:AWQ 两阶段(缩放 + 裁剪搜索) vs RTN,逐级降低加权误差。"""
+    print("\n[步骤5] AWQ(激活感知缩放 + 权重裁剪搜索) vs RTN")
     torch.manual_seed(1)
     W = torch.randn(64, 256)
+    W[:, ::16] *= 6.0                      # 注入权重离群,凸显裁剪搜索的贡献
     act = torch.rand(256) + 0.05
     act[:4] *= 50.0                        # 4 个超大激活通道
     cfg = QuantConfig(n_bits=3, group_size=256, symmetric=False, method="awq")
 
-    W_awq = awq_quantize_weight(W, act, cfg)
+    def werr(W_dq):
+        return ((W - W_dq) * act.unsqueeze(0)).pow(2).sum().item()
+
     W_rtn = fake_quant_groupwise(W, cfg.n_bits, cfg.group_size, cfg.symmetric)
-    wa = ((W - W_awq) * act.unsqueeze(0)).pow(2).sum().item()
-    wr = ((W - W_rtn) * act.unsqueeze(0)).pow(2).sum().item()
-    print(f"  INT3 激活加权误差(越低越好): RTN={wr:.1f}  AWQ={wa:.1f}")
-    print(f"  AWQ 相对 RTN 降低: {(1 - wa / wr):.2%}")
+    W_scale = awq_quantize_weight(W, act, cfg, clip_search=False)  # 仅缩放
+    W_full = awq_quantize_weight(W, act, cfg, clip_search=True)    # 缩放+裁剪
+    wr, ws, wf = werr(W_rtn), werr(W_scale), werr(W_full)
+    print(f"  INT3 激活加权误差(越低越好): RTN={wr:.1f}  "
+          f"AWQ缩放={ws:.1f}  AWQ缩放+裁剪={wf:.1f}")
+    print(f"  缩放 vs RTN 降低: {(1 - ws / wr):.2%};"
+          f"裁剪再降: {(1 - wf / ws):.2%}(逐组搜最优范围收缩 α)")
 
 
 def step6_group_sweep():
