@@ -1,0 +1,29 @@
+# M1 消融:linears GPTQ INT4 + embedding RTN INT4(激进压缩,目标 ~3.76x)
+exp_id: m1_gptq_int4_embint4
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+quant:
+  method: gptq
+  n_bits: 4
+  group_size: 128
+  symmetric: false
+  skip: ["lm_head"]
+  calib_n_samples: 128
+  calib_seqlen: 512
+  quant_embedding: true
+  embedding_bits: 4      # embedding 与 linears 同精度,压缩比最高
+
+eval:
+  seqlen: 2048
+  stride: 2048
+  max_samples: null
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128

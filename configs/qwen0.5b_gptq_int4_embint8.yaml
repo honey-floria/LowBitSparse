@@ -1,0 +1,30 @@
+# M1 消融:linears GPTQ INT4(冠军配置)+ embedding RTN INT8
+# 目的:量化 embedding(绑定的 lm_head 一并),突破 embedding FP16 压缩地板。
+exp_id: m1_gptq_int4_embint8
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+quant:
+  method: gptq
+  n_bits: 4              # linears 位宽
+  group_size: 128
+  symmetric: false
+  skip: ["lm_head"]      # 保留:lm_head 由 embedding 绑定路径统一处理
+  calib_n_samples: 128
+  calib_seqlen: 512
+  quant_embedding: true  # 量化输入 embedding(绑定时 lm_head 共享同一反量化权重)
+  embedding_bits: 8      # embedding 单独用 INT8(比 linears 保守,输出头敏感)
+
+eval:
+  seqlen: 2048
+  stride: 2048
+  max_samples: null
+
+profile:
+  prefill_len: 512
+  decode_tokens: 128
