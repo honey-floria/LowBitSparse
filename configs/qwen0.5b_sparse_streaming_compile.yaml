@@ -1,0 +1,33 @@
+# M2-e 验证配置:量 decode overhead 上限
+# 目的:测 torch.compile + StaticCache 的无裁剪 decode 吞吐,与 eager decode 对比。
+# 若 compiled_decode.speedup_vs_eager 大幅 > 1,则坐实 decode 是 overhead-bound
+# (kernel launch / Python 循环),而非 KV-bound —— 固定大小 ring-buffer KV cache
+# (形状恒定 + CUDA graph + 恒定显存)值得做,是 M2-c 拿到真加速的正解。
+# 注意:compile_decode 与 KV 裁剪互斥(static cache 形状固定),故此处 cache_pruning=false,
+# compiled_decode 分支只在 past_pruner=None 的路径生效,结果写入每行 latency.compiled_decode。
+exp_id: m2e_streaming_compile_probe
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: float16
+  device: cuda
+
+sparse:
+  mode: streaming_llm
+  window_size: 1024
+  sink_size: 64
+  block_size: 128
+  block_lookback: 1
+  cache_pruning: false
+  benchmark_lengths: [2048, 4096, 8192, 16384]
+
+eval:
+  max_samples: null
+
+profile:
+  decode_tokens: 128
+  warmup: 2
+  repeats: 5
+  compile_decode: true

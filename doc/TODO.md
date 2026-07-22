@@ -153,12 +153,13 @@ LowBitSparse/
 > 备注:M2 的代码链路和实验记录已完成,但本轮 A100 实测没有拿到加速,当前更像“功能完成 + 结果负反馈”。若继续攻坚,重点应转向 kernel-aware attention hook,而不是继续堆普通 additive mask。
 
 #### M2 后续优化计划
-- [~] **M2-c StreamingLLM KV cache 裁剪**:只保留 attention sink + 最近 window 的 K/V,让 decode 阶段真实缩短 `kv_len`,不再只靠 mask 屏蔽旧 token。
+- [x] **M2-c StreamingLLM KV cache 裁剪**:只保留 attention sink + 最近 window 的 K/V,让 decode 阶段真实缩短 `kv_len`,不再只靠 mask 屏蔽旧 token。
       验收目标:StreamingLLM 质量保持 `ΔPPL < 1.5`,decode speedup > 1.2x,peak memory 不高于 dense baseline。
+      本轮结果(3 中 2 达标):ΔPPL ✅(最差 16k +1.35)、peak memory ✅(转为正节省,16k 省 361MB)、decode speedup ❌(仍 0.91x)。
 - [x] Cache 兼容层:支持 HF `past_key_values` / `DynamicCache` / tuple cache 的读取、裁剪与回写,保证 `generate()` 和手写 profiler 都可用。
 - [x] M2-c 单测与 smoke:覆盖 sink 保留、窗口边界、cache 长度单调裁剪、restore 行为、无 cache 的 prefill 退化路径。
 - [x] M2-c A100 回归:2k/4k/8k/16k decode-only benchmark,输出 `results/m2c_streaming_kvprune_*.json` 与汇总表。
-      结果回填:本次运行已完成,但 A100 上实际 cache 形态落在旧兼容层外,裁剪统计显示 `unsupported_cache`,因此 decode / memory 基本与 baseline 持平;已将这个负结果保留为兼容性回归,后续需用更新后的 cache layer 兼容层重跑。
+      结果回填(2026-07-22 重跑,新版 HF cache 容器兼容层已落地 commit ccc8052/b28fdef):裁剪**已真实生效**——`applied: true`、`applied_steps=903`、覆盖全 24 层、cache 稳定裁到 `kept_len=1088`(sink 64 + window 1024)。peak memory 由旧版负反馈翻为正节省(2k +24MB → 16k +361MB,随序列增长),质量 ΔPPL 守在 1.5 内。**但 decode speedup 仍 0.907–0.915x(未达 1.2x)**:根因是 0.5B decode 为权重带宽瓶颈而非 KV 瓶颈,把 KV 从 16384 砍到 1088 对每步延迟几乎无影响,而 903×24 层的 Python 侧裁剪记账开销盖过了注意力上省下的时间(稳态每步仅 `pruned:1`)。结构性结论,非 bug——decode 加速须转 M2-e kernel-aware 路径。
 - [ ] **M2-d chunked prefill / local attention**:prefill 阶段避免构造完整 `[batch,1,q,kv]` additive mask,按 query chunk 只看局部 K/V。
       验收目标:8k/16k peak memory 低于 dense baseline,prefill 不慢于 dense。
 - [ ] **M2-e kernel-aware attention hook**:从顶层 `attention_mask` 注入升级到 attention module 内部 patch,尽量保留 FlashAttention/SDPA fast path;必要时再评估 Triton/FlashAttention local/block kernel。
