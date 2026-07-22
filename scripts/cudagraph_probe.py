@@ -19,8 +19,14 @@
         --prefill 2048 --decode 128
 """
 import argparse
+import os
 import statistics
+import sys
 import time
+
+# `python scripts/xxx.py` 只把 scripts/ 加进 sys.path,这里把仓库根补上,
+# 保证能 import lowbitsparse(main.py 在根目录故无此问题)。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _sync():
