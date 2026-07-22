@@ -55,6 +55,25 @@ class RingKVCache:
     def get_max_length(self):
         return self.total
 
+    def get_mask_sizes(self, cache_position, layer_idx: int = 0):
+        """返回 (kv_length, kv_offset) 供 attention mask 构造(新版 HF Cache 接口)。
+
+        本 cache 是静态形状:update 返回的 K/V 长度恒定 = 当前已填充长度(prefill 后
+        = sink+window)。故 mask 必须覆盖这个实际返回长度,offset=0(绝对位置由 cache
+        内部回绕管理,mask 从 buffer 头覆盖整块)。签名兼容标量(query_length)与 tensor
+        (cache_position)两种版本。
+        """
+        if torch.is_tensor(cache_position):
+            query_length = int(cache_position.shape[0])
+        else:
+            query_length = int(cache_position)
+        filled = int(self._filled.get(layer_idx, 0))
+        if filled >= self.total:
+            # 已满(decode 稳态):返回恒定 buffer 长度。
+            return self.total, 0
+        # 未满(prefill 首次):mask 覆盖已填充 + 本次 query。
+        return filled + query_length, 0
+
     def _ensure_buf(self, key_states: torch.Tensor, layer_idx: int):
         """按首次写入的 [B, H, *, D] 分配该层恒定 buffer。"""
         if layer_idx in self.key_buf:
