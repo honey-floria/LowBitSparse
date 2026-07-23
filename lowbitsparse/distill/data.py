@@ -12,8 +12,22 @@ def load_token_ids(tokenizer, dataset_id: str, dataset_config: str, split: str) 
     from datasets import load_dataset
 
     data = load_dataset(dataset_id, dataset_config, split=split)
-    text = "\n\n".join(data["text"])
-    return tokenizer(text, return_tensors="pt").input_ids[0]
+    all_ids = []
+    chunk_size = 256
+    texts = data["text"]
+    for begin in range(0, len(texts), chunk_size):
+        batch_text = [t for t in texts[begin: begin + chunk_size] if t]
+        if not batch_text:
+            continue
+        encoded = tokenizer(
+            batch_text,
+            add_special_tokens=False,
+            return_attention_mask=False,
+            truncation=False,
+        )
+        for seq in encoded["input_ids"]:
+            all_ids.extend(seq)
+    return torch.tensor(all_ids, dtype=torch.long)
 
 
 def fixed_length_windows(token_ids: torch.Tensor, seqlen: int, max_samples: int | None = None,

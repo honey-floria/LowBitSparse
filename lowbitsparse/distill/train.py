@@ -241,10 +241,6 @@ def run_distillation_from_config(cfg_dict: dict) -> dict:
     if hasattr(teacher, "config") and hasattr(teacher.config, "use_cache"):
         teacher.config.use_cache = False
 
-    qcfg = cfg.quant
-    student, replaced = prepare_distill_student(student, qcfg)
-    log.info("[M3] student prepared: replaced=%d, quant=%s", replaced, qcfg)
-
     train_ids = load_token_ids(tokenizer, cfg.dataset_id, cfg.dataset_config, cfg.train_split)
     eval_ids = load_token_ids(tokenizer, cfg.dataset_id, cfg.dataset_config, cfg.eval_split)
     train_windows = fixed_length_windows(train_ids, cfg.seqlen, cfg.train_samples, shuffle=True, seed=cfg.seed)
@@ -253,8 +249,24 @@ def run_distillation_from_config(cfg_dict: dict) -> dict:
     eval_evaluator = build_ppl_evaluator(eval_windows.reshape(-1), cfg.seqlen, stride=cfg.seqlen)
 
     teacher_base = model_size_report(teacher)
+    try:
+        teacher_ppl = eval_evaluator(teacher)
+    except RuntimeError as exc:
+        log.warning("[M3] teacher eval failed once: %s; retry with fresh teacher", exc)
+        teacher, _ = load_model_and_tokenizer(
+            model_name=teacher_name,
+            dtype=teacher_dtype,
+            device=device,
+        )
+        if hasattr(teacher, "config") and hasattr(teacher.config, "use_cache"):
+            teacher.config.use_cache = False
+        teacher_ppl = eval_evaluator(teacher)
+
+    qcfg = cfg.quant
+    student, replaced = prepare_distill_student(student, qcfg)
+    log.info("[M3] student prepared: replaced=%d, quant=%s", replaced, qcfg)
+
     student_base = model_size_report(student)
-    teacher_ppl = eval_evaluator(teacher)
     student_init_ppl = eval_evaluator(student)
 
     train_result = run_distillation_loop(
