@@ -119,11 +119,18 @@ def run_distillation_loop(teacher, student, train_batches: Iterable[torch.Tensor
     )
     amp_enabled = bool(cfg.use_amp and str(device).startswith("cuda"))
     amp_dtype = torch.float16
+    if amp_enabled and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        amp_dtype = torch.bfloat16
+    use_scaler = amp_enabled and amp_dtype == torch.float16
     try:
-        scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+        scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
     except Exception:
-        scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
+        scaler = torch.cuda.amp.GradScaler(enabled=use_scaler)
     autocast_ctx = lambda: torch.autocast(device_type="cuda", dtype=amp_dtype) if amp_enabled else nullcontext()
+
+    for p in trainable_params:
+        if p.dtype != torch.float32:
+            p.data = p.data.float()
 
     history = []
 
@@ -167,7 +174,7 @@ def run_distillation_loop(teacher, student, train_batches: Iterable[torch.Tensor
                 gamma_hidden=cfg.gamma_hidden,
             )
 
-        if amp_enabled:
+        if use_scaler:
             scaler.scale(loss).backward()
             if cfg.grad_clip and cfg.grad_clip > 0:
                 scaler.unscale_(optimizer)
