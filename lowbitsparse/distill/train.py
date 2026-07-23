@@ -107,9 +107,12 @@ def run_distillation_loop(teacher, student, train_batches: Iterable[torch.Tensor
     student.train()
     for p in teacher.parameters():
         p.requires_grad_(False)
+    trainable_params = [p for p in student.parameters() if p.requires_grad]
+    if not trainable_params:
+        raise ValueError("student 没有可训练参数")
 
     optimizer = torch.optim.AdamW(
-        student.parameters(),
+        trainable_params,
         lr=cfg.lr,
         betas=cfg.betas,
         weight_decay=cfg.weight_decay,
@@ -168,7 +171,7 @@ def run_distillation_loop(teacher, student, train_batches: Iterable[torch.Tensor
             scaler.scale(loss).backward()
             if cfg.grad_clip and cfg.grad_clip > 0:
                 scaler.unscale_(optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.grad_clip)
+                grad_norm = torch.nn.utils.clip_grad_norm_(trainable_params, cfg.grad_clip)
             else:
                 grad_norm = None
             scaler.step(optimizer)
@@ -176,7 +179,7 @@ def run_distillation_loop(teacher, student, train_batches: Iterable[torch.Tensor
         else:
             loss.backward()
             if cfg.grad_clip and cfg.grad_clip > 0:
-                grad_norm = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.grad_clip)
+                grad_norm = torch.nn.utils.clip_grad_norm_(trainable_params, cfg.grad_clip)
             else:
                 grad_norm = None
             optimizer.step()

@@ -44,6 +44,9 @@ def test_prepare_and_export_distill_student():
 
     model, n = prepare_distill_student(model, qcfg)
     assert n >= 1
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    assert trainable
+    assert all(p.dtype == torch.float32 for p in trainable)
     assert isinstance(model.proj, DistillLinear)
     out = model(torch.randint(0, 32, (2, 12)))
     assert out.logits.shape == (2, 12, 32)

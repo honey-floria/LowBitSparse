@@ -30,25 +30,27 @@ class DistillLinear(nn.Module):
         self.group_size = linear.in_features if cfg.group_size in (-1, None) else cfg.group_size
         self.symmetric = cfg.symmetric
         self.method = getattr(cfg, "method", "rtn")
+        self.compute_dtype = linear.weight.dtype
         init = weight if weight is not None else fake_quant_groupwise(
             linear.weight.data, cfg.n_bits, cfg.group_size, cfg.symmetric)
-        self.weight = nn.Parameter(init.to(linear.weight.dtype).clone())
+        self.weight = nn.Parameter(init.float().clone())
         if linear.bias is not None:
-            self.bias = nn.Parameter(linear.bias.data.clone())
+            self.bias = nn.Parameter(linear.bias.data.float().clone())
         else:
             self.bias = None
 
     def forward(self, x):
-        w = _ste_fake_quant(self.weight, self.n_bits, self.group_size, self.symmetric)
-        return F.linear(x, w, self.bias)
+        w = _ste_fake_quant(self.weight, self.n_bits, self.group_size, self.symmetric).to(dtype=x.dtype)
+        bias = self.bias.to(dtype=x.dtype) if self.bias is not None else None
+        return F.linear(x, w, bias)
 
     def export_fake_quant(self, cfg: QuantConfig, w_dq: torch.Tensor | None = None) -> FakeQuantLinear:
         """导出成推理用 FakeQuantLinear。"""
         holder = nn.Linear(self.in_features, self.out_features, bias=self.bias is not None)
-        holder = holder.to(device=self.weight.device, dtype=self.weight.dtype)
-        holder.weight = nn.Parameter(self.weight.detach().clone())
+        holder = holder.to(device=self.weight.device, dtype=self.compute_dtype)
+        holder.weight = nn.Parameter(self.weight.detach().clone().to(self.compute_dtype))
         if self.bias is not None:
-            holder.bias = nn.Parameter(self.bias.detach().clone())
+            holder.bias = nn.Parameter(self.bias.detach().clone().to(self.compute_dtype))
         return FakeQuantLinear(holder, replace(cfg, method=getattr(cfg, "method", "rtn")), w_dq=w_dq)
 
 
@@ -63,19 +65,20 @@ class DistillEmbedding(nn.Module):
         self.n_bits = cfg.n_bits
         self.group_size = emb.embedding_dim if cfg.group_size in (-1, None) else cfg.group_size
         self.symmetric = cfg.symmetric
+        self.compute_dtype = emb.weight.dtype
         init = weight if weight is not None else fake_quant_groupwise(
             emb.weight.data, cfg.n_bits, cfg.group_size, cfg.symmetric)
-        self.weight = nn.Parameter(init.to(emb.weight.dtype).clone())
+        self.weight = nn.Parameter(init.float().clone())
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         w = _ste_fake_quant(self.weight, self.n_bits, self.group_size, self.symmetric)
-        return F.embedding(input_ids, w, padding_idx=self.padding_idx)
+        return F.embedding(input_ids, w).to(self.compute_dtype)
 
     def export_fake_quant(self, cfg: QuantConfig, w_dq: torch.Tensor | None = None) -> FakeQuantEmbedding:
         """导出成推理用 FakeQuantEmbedding。"""
         holder = nn.Embedding(self.num_embeddings, self.embedding_dim, padding_idx=self.padding_idx)
-        holder = holder.to(device=self.weight.device, dtype=self.weight.dtype)
-        holder.weight = nn.Parameter(self.weight.detach().clone())
+        holder = holder.to(device=self.weight.device, dtype=self.compute_dtype)
+        holder.weight = nn.Parameter(self.weight.detach().clone().to(self.compute_dtype))
         e_bits = cfg.embedding_bits if cfg.embedding_bits is not None else cfg.n_bits
         return FakeQuantEmbedding(holder, e_bits, cfg.group_size, cfg.symmetric, w_dq=w_dq)
 
@@ -104,6 +107,8 @@ def _find_module_parent(model, target):
 
 def prepare_distill_student(model, cfg: QuantConfig):
     """把 student 改造成可训练的 fake-quant 版本。"""
+    for p in model.parameters():
+        p.requires_grad_(False)
     targets = _iter_replacements(model, cfg.skip)
     weight_cache = {}
     n = 0
