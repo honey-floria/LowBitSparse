@@ -200,6 +200,106 @@ def profile_latency(
     return result
 
 
+@torch.no_grad()
+def profile_chunked_prefill_latency(
+    model,
+    tokenizer,
+    prefill_len: int = 8192,
+    chunk_size: int = 512,
+    decode_tokens: int = 128,
+    warmup: int = 2,
+    repeats: int = 5,
+    device: str = None,
+    past_pruner=None,
+    reset_peak_after_prefill: bool = False,
+) -> dict:
+    """M2-d:按 query chunk 做 prefill,避免一次性构造完整长序列 attention。
+
+    标准 prefill 是一次 `model(input_ids[:, :N])`,长序列下会让 attention/mask/cache
+    都按 N 展开。M2-d 改成每次只喂一个 query chunk,并在 chunk 之间用 StreamingLLM
+    规则裁剪 `past_key_values`,使下一块只看 sink + 最近 window 的有限历史。
+
+    这条路径的质量不在 profiler 内判断;benchmark 仍用 additive mask 的 teacher-forced
+    PPL 作参考。这里专注测 latency/memory 的真实执行形态。
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    chunk_size = max(int(chunk_size), 1)
+    vocab = model.config.vocab_size
+    input_ids = torch.randint(0, vocab, (1, prefill_len), device=device)
+
+    prefill_times, decode_tps = [], []
+    prune_applied_steps = 0
+    prune_last = None
+    pass_cache_position = past_pruner is not None and _supports_kwarg(model.forward, "cache_position")
+    chunks = (prefill_len + chunk_size - 1) // chunk_size
+
+    for i in range(warmup + repeats):
+        past = None
+        out = None
+
+        _sync(device)
+        t0 = time.perf_counter()
+        for start in range(0, prefill_len, chunk_size):
+            end = min(start + chunk_size, prefill_len)
+            chunk = input_ids[:, start:end]
+            kwargs = {"use_cache": True}
+            if past is not None:
+                kwargs["past_key_values"] = past
+            if pass_cache_position:
+                kwargs["cache_position"] = torch.arange(
+                    start, end, device=device, dtype=torch.long)
+            out = model(chunk, **kwargs)
+            past = out.past_key_values
+            past, stats = _apply_past_pruner(past, past_pruner)
+            prune_last = stats or prune_last
+            if stats and stats.get("applied"):
+                prune_applied_steps += 1
+        _sync(device)
+        t1 = time.perf_counter()
+
+        nxt = out.logits[:, -1:].argmax(-1)
+        if reset_peak_after_prefill and str(device).startswith("cuda"):
+            torch.cuda.reset_peak_memory_stats()
+
+        _sync(device)
+        t2 = time.perf_counter()
+        for step in range(decode_tokens):
+            kwargs = {"past_key_values": past, "use_cache": True}
+            if pass_cache_position:
+                kwargs["cache_position"] = torch.tensor(
+                    [prefill_len + step], device=device, dtype=torch.long)
+            out = model(nxt, **kwargs)
+            past = out.past_key_values
+            past, stats = _apply_past_pruner(past, past_pruner)
+            prune_last = stats or prune_last
+            if stats and stats.get("applied"):
+                prune_applied_steps += 1
+            nxt = out.logits[:, -1:].argmax(-1)
+        _sync(device)
+        t3 = time.perf_counter()
+
+        if i >= warmup:
+            prefill_times.append(t1 - t0)
+            decode_tps.append(decode_tokens / (t3 - t2))
+
+    return {
+        "prefill_len": prefill_len,
+        "decode_tokens": decode_tokens,
+        "prefill_ms_median": round(statistics.median(prefill_times) * 1e3, 3),
+        "decode_tps_median": round(statistics.median(decode_tps), 2),
+        "chunked_prefill": {
+            "enabled": True,
+            "chunk_size": chunk_size,
+            "chunks": chunks,
+            "past_pruner": past_pruner is not None,
+            "cache_position_passed": pass_cache_position,
+            "prune_applied_steps": prune_applied_steps,
+            "last_prune": prune_last,
+        },
+    }
+
+
 def profile_memory(device: str = None) -> dict:
     """返回当前与峰值显存(MB)。
 

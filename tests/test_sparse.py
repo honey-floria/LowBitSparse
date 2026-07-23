@@ -4,6 +4,7 @@ import pytest
 torch = pytest.importorskip("torch")
 import torch.nn as nn
 
+from lowbitsparse.eval import profile_chunked_prefill_latency
 from lowbitsparse.sparse import (
     CachePruneStats, SparseConfig, build_sparse_attention_mask,
     install_sparse_attention, install_streaming_kv_pruning,
@@ -40,6 +41,17 @@ def test_block_sparse_has_density():
     density = sparse_density(8, 8, cfg)
     assert 0 < density["density"] < 1
     assert density["sparsity"] > 0
+
+
+def test_sparse_config_accepts_chunked_prefill_fields():
+    cfg = SparseConfig.from_dict({
+        "mode": "streaming",
+        "chunked_prefill": True,
+        "prefill_chunk_size": 256,
+    })
+    assert cfg.mode == "streaming_llm"
+    assert cfg.chunked_prefill
+    assert cfg.prefill_chunk_size == 256
 
 
 def test_streaming_keep_indices_keeps_sink_and_window():
@@ -169,6 +181,28 @@ class KVForwardLM(nn.Module):
         return DummyOutput(self.proj(torch.randn(1, 1, 8)), ((key, value),))
 
 
+class ChunkedToyLM(nn.Module):
+    def __init__(self, vocab=32, d=8):
+        super().__init__()
+        self.config = type("Config", (), {"vocab_size": vocab})()
+        self.embed = nn.Embedding(vocab, d)
+        self.proj = nn.Linear(d, vocab)
+        self.cache_positions = []
+
+    def forward(self, input_ids, past_key_values=None, use_cache=False,
+                cache_position=None):
+        if cache_position is not None:
+            self.cache_positions.append(cache_position.detach().cpu())
+        prev_len = 0
+        if past_key_values:
+            prev_len = int(past_key_values[0][0].shape[-2])
+        cur_len = int(input_ids.shape[1])
+        logits = self.proj(self.embed(input_ids))
+        key = torch.randn(1, 2, prev_len + cur_len, 4, device=input_ids.device)
+        value = torch.randn(1, 2, prev_len + cur_len, 4, device=input_ids.device)
+        return DummyOutput(logits, ((key, value),))
+
+
 def test_install_sparse_attention_forward_fallback():
     model = ForwardOnlyLM()
     ids = torch.randint(0, 32, (2, 6))
@@ -226,6 +260,27 @@ def test_install_streaming_kv_pruning_layers_cache():
         assert handle.last_stats.applied
     finally:
         handle.restore()
+
+
+def test_profile_chunked_prefill_latency_records_chunks_and_pruning():
+    model = ChunkedToyLM()
+    cfg = SparseConfig(mode="streaming_llm", window_size=2, sink_size=1)
+
+    def pruner(past):
+        return prune_streaming_past_key_values(past, cfg)
+
+    lat = profile_chunked_prefill_latency(
+        model, tokenizer=None, prefill_len=8, chunk_size=3,
+        decode_tokens=2, warmup=0, repeats=1, past_pruner=pruner)
+
+    assert lat["prefill_len"] == 8
+    assert lat["chunked_prefill"]["enabled"]
+    assert lat["chunked_prefill"]["chunk_size"] == 3
+    assert lat["chunked_prefill"]["chunks"] == 3
+    assert lat["chunked_prefill"]["past_pruner"]
+    assert lat["chunked_prefill"]["cache_position_passed"]
+    assert lat["chunked_prefill"]["prune_applied_steps"] > 0
+    assert model.cache_positions
 
 
 # ---- M2-e RingKVCache(回绕 KV cache)----

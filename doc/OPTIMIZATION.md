@@ -394,7 +394,7 @@
 3. **decode 不涨是结构性的,非 bug**:0.5B 在 A100 上 decode 为**权重带宽瓶颈**(与 M0 复盘"decode 开销受限"同源),KV attention 不是瓶颈,故把 KV 从 16384 砍到 1088 对每步延迟几乎无贡献;而 903 步 × 24 层的 Python 侧 cache 切片/回写是固定开销,盖过了注意力上省下的微小时间。稳态每步 `pruned:1`(一次只移一个 token),每步收益极小、记账开销固定 → 净负。内存节省有限也因 prefill 阶段先分配了完整长度 cache,裁剪才介入。
 4. **质量参考口径不变**:PPL 仍是 additive mask 的 teacher-forced 值,与 M2-b StreamingLLM 均值 +0.841 完全一致(同一质量路径),只是 latency/memory 换成了真实裁剪执行。
 
-**结论 & 下一步**:M2-c 机械目标达成(兼容层修复、裁剪验证生效、内存转正、质量守 1.5),标记 `[x]`。但它再次坐实 M2 核心结论:**mask / cache 切片类稀疏在小模型上拿不到 decode 加速**——decode 受权重带宽限制,裁剪开销 > 注意力收益。要够到 ≥1.2x decode / ≥1.5x prefill,须走 TODO 里仍开放的 M2-d(chunked prefill,避开完整 additive mask)与 M2-e(kernel-aware attention hook,保住 SDPA/FlashAttention 快路径),而非继续在 mask/裁剪层调参。M2-c 的净价值是"零质量代价换长序列显存",不是加速。
+**结论 & 下一步**:M2-c 机械目标达成(兼容层修复、裁剪验证生效、内存转正、质量守 1.5),标记 `[x]`。但它再次坐实 M2 核心结论:**mask / cache 切片类稀疏在小模型上拿不到 decode 加速**——decode 受权重带宽限制,裁剪开销 > 注意力收益。后续已分别转入 M2-d(chunked prefill,避开完整 additive mask)与 M2-e(ring-buffer + CUDA graph decode),而非继续在 mask/裁剪层调参。M2-c 的净价值是"零质量代价换长序列显存",不是加速。
 
 ## [2026-07-22] M2-e 前置探针 — 坐实 decode overhead-bound,CUDA graph 拿到 3.1x
 **背景 / 目标**:M2-c decode 不加速(0.911x)。要判断根因是"KV 太长"还是"固定 overhead",并验证消除 overhead 的收益上限,决定 M2-e(kernel-aware / ring-buffer)值不值得做、怎么做。
@@ -452,8 +452,23 @@
 
 **验证**:CPU 单测 5 passed(回绕槽位/恒定形状/sink 保留/长度封顶/reset);A100 门控 `--ring` 不崩 + 5.2x + 显存恒定;集成 benchmark 四长度全 `available: True`。
 
-**遗留 / 边界**:①未做 RoPE 相位忠实修正,graph 路径不保证生成 token 正确性(仅测速/测显存);要用于 `generate()` 需补 re-rotation。②prefill 加速仍属 M2-d(chunked prefill),M2-e 只解决 decode 侧。③16k 的 ΔPPL +1.354 接近 1.5 阈值,window/sink 再缩或序列再长需留意质量。
+**遗留 / 边界**:①未做 RoPE 相位忠实修正,graph 路径不保证生成 token 正确性(仅测速/测显存);要用于 `generate()` 需补 re-rotation。②M2-e 只解决 decode 侧;prefill 已由 M2-d 提供 chunked benchmark 路径,仍待 A100 数字回填。③16k 的 ΔPPL +1.354 接近 1.5 阈值,window/sink 再缩或序列再长需留意质量。
 
 **结论**:M2 翻案成功——从"功能完成+零加速"到 **decode 5.3x + 恒定显存**。小模型 decode 的瓶颈是 kernel launch overhead,CUDA graph 是解药,ring-buffer 是使能条件。M2 里程碑核心结论闭合。
+
+## [2026-07-23] M2-d 实现 — chunked prefill / local attention 路径落地
+**背景 / 目标**:M2-e 已解决 decode,但 prefill 仍沿用 dense 一次性整段 forward。M2-d 的目标是避免长序列 prefill 阶段构造完整 `[batch,1,q,kv]` additive mask,改成按 query chunk 流式推进,并在 chunk 之间只保留 StreamingLLM 的 sink + window 历史。
+
+**方案**:
+- `SparseConfig` 新增 `chunked_prefill` / `prefill_chunk_size`。
+- `profile_chunked_prefill_latency` 按 chunk 多次 forward,chunk 间调用 `prune_streaming_past_key_values`,并在裁剪 cache 时传递绝对 `cache_position`,避免 RoPE 位置随物理 cache 长度回退。
+- `benchmark_streaming_chunked_prefill` 新增 M2-d benchmark 分支:baseline 仍跑 dense;质量仍用 StreamingLLM additive mask 的 teacher-forced PPL 参考;latency/memory 走真实 chunked prefill + KV prune。
+- 新增配置 `configs/qwen0.5b_sparse_streaming_chunked.yaml`,默认 sink=64、window=1024、chunk=512。
+
+**验证**:
+- 本地编译与 `tests/test_sparse.py` 覆盖配置解析、chunk 计数、cache_position 透传和裁剪命中。
+- A100 性能数字尚未回填;下一步跑 `python main.py sparse --config configs/qwen0.5b_sparse_streaming_chunked.yaml`,生成 `results/m2d_streaming_chunked_s64_w1024_c512.json` 后再补速查表。
+
+**边界**:chunk 内部仍走模型原生 dense causal attention,严格 StreamingLLM 局部性只在 chunk 边界兑现;`prefill_chunk_size` 越小越接近 token 级 local attention,但 forward 次数越多。M2-d 解决的是 prefill 显存/完整 mask 问题,decode 加速仍以 M2-e ring+graph 为主。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

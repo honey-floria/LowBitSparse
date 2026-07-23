@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 压缩比 | 模型体积 / 平均比特数 | INT4 达到 ~3.5-4x 体积压缩 ✅ 达成(emb INT4 3.76x;emb INT8 2.99x 零精度代价,见 M1-g) |
 | 精度 | WikiText-2 PPL、下游任务 | INT4 PPL 退化 < 1.0(蒸馏后) |
-| 加速比 | 长序列 prefill / decode 延迟 | decode 已由 M2-e ring+graph 达成 ~5.3x;prefill 仍开放(M2-d) |
+| 加速比 | 长序列 prefill / decode 延迟 | decode 已由 M2-e ring+graph 达成 ~5.3x;prefill 已有 M2-d chunked 路径(A100 数字待回填) |
 | 恢复曲线 | 蒸馏 step vs PPL | 恢复 RTN-INT4 损失的 ≥ 60% |
 
 ### 1.3 里程碑(来自 README)
@@ -53,6 +53,7 @@ LowBitSparse/
 │   ├── qwen0.5b_sparse_streaming.yaml #   StreamingLLM M2
 │   ├── qwen0.5b_sparse_block.yaml     #   Block-sparse M2(可选)
 │   ├── qwen0.5b_sparse_streaming_kvprune.yaml   #   M2-c KV cache 裁剪
+│   ├── qwen0.5b_sparse_streaming_chunked.yaml   #   M2-d chunked prefill
 │   ├── qwen0.5b_sparse_streaming_compile.yaml   #   M2-e 前置 compile/graph 探针
 │   └── qwen0.5b_sparse_streaming_ringgraph.yaml #   M2-e ring-buffer + CUDA graph
 ├── lowbitsparse/
@@ -76,7 +77,7 @@ LowBitSparse/
 │   ├── cpu_smoke.py             #   CPU 秒级冒烟:步骤1-7 演示量化数学+校准流水线(无下载)
 │   ├── run_sweep.py             #   method×bit×group_size 全组合扫描,落盘 json
 │   ├── summarize.py             #   汇总 results/*.json 为验收表格(含 ΔPPL)
-│   └── run.ipynb                #   Colab:挂 Drive、装依赖、跑 M0/M1/M2/M2-c/M2-e
+│   └── run.ipynb                #   Colab:挂 Drive、装依赖、跑 M0/M1/M2/M2-c/M2-d/M2-e
 ├── tests/                       # pytest:test_rtn / test_gptq / test_awq / test_group_size
 ├── results/                     # 指标 json / 曲线图 / 报告
 └── doc/                         # TODO.md、OPTIMIZATION.md、CPU_SMOKE_MAP.md
@@ -151,11 +152,10 @@ LowBitSparse/
 - [x] StreamingLLM(sink + 窗口)实现
 - [x] Block-sparse 实现(可选)
 - [x] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存(A100 已回填 `results/m2_*.json`)
-- [x] **验收**:加速比曲线 + 长文质量保持表(已回填;M2-e decode 达标,prefill 仍转 M2-d)
+- [x] **验收**:加速比曲线 + 长文质量保持表(已回填;M2-e decode 达标,M2-d prefill 代码路径已完成/A100 数字待回填)
 
 > 备注(2026-07-22 更新):M2-a/b 的 additive mask 路径确实没拿到加速(功能完成+负反馈),但这不是 M2 的终点。M2-c 让 KV 裁剪真实生效(显存转正,decode 仍不涨),**M2-e 最终翻案**:先用探针定量证明 decode 是 overhead-bound(非 KV-bound),再用有界 ring-buffer KV cache + CUDA graph 拿到 **decode ~5.3x + 恒定显存**。核心教训:小模型 decode 的瓶颈是 kernel launch overhead,加速来自 CUDA graph,稀疏(固定小 cache)是让 graph 在长序列下可行的使能条件,而非加速本身的来源。
 
-#### M2 后续优化计划
 - [x] **M2-c StreamingLLM KV cache 裁剪**:只保留 attention sink + 最近 window 的 K/V,让 decode 阶段真实缩短 `kv_len`,不再只靠 mask 屏蔽旧 token。
       验收目标:StreamingLLM 质量保持 `ΔPPL < 1.5`,decode speedup > 1.2x,peak memory 不高于 dense baseline。
       本轮结果(3 中 2 达标):ΔPPL ✅(最差 16k +1.35)、peak memory ✅(转为正节省,16k 省 361MB)、decode speedup ❌(仍 0.91x)。
@@ -167,7 +167,8 @@ LowBitSparse/
       两个 A100 探针先定量锁定根因——decode 是 **overhead-bound**(单次 forward ~26.5ms 固定地板,512 token 仅比 1 token 慢 9.3%),CUDA graph 可消除。再实现 `RingKVCache`(固定 sink+window=1088 回绕写入,decode 返回恒定形状 buffer)+ graph 捕获。
       **结果(decode 目标 ≥1.2x 大幅超标):2k/4k/8k/16k decode speedup 全部 ~5.3x(36→193 tok/s),显存恒定在 1088(省 18→327MB 随长度增长),ΔPPL 与 M2-c 一致守 1.5 内**。数据源 `results/m2e_streaming_ringgraph_s64_w1024.json`。关键洞察:decode 加速来自 CUDA graph 消 overhead,稀疏的作用是让固定形状 cache 在任意长序列下可行。范围为 Benchmark 证明(latency/memory 真实路径,quality 用 additive mask 参考,不做 RoPE 相位忠实修正)。
       代码:`lowbitsparse/sparse/ring_cache.py`、`scripts/cudagraph_probe.py --ring`、`configs/qwen0.5b_sparse_streaming_ringgraph.yaml`。
-- [ ] **M2-d chunked prefill / local attention**(仍开放):prefill 阶段避免构造完整 `[batch,1,q,kv]` additive mask,按 query chunk 只看局部 K/V。验收目标:8k/16k peak memory 低于 dense baseline,prefill 不慢于 dense。(M2-e 已解决 decode 侧,prefill 加速仍待此项。)
+- [x] **M2-d chunked prefill / local attention**:
+      实现 `profile_chunked_prefill_latency`:prefill 不再一次性喂完整长序列,而是按 `prefill_chunk_size` 拆 query chunk;chunk 之间用 StreamingLLM 规则真实裁剪 `past_key_values`,避免构造完整 `[batch,1,q,kv]` additive mask,并把长序列 cache 限制在 sink+window 量级。质量仍用 additive mask teacher-forced PPL 参考,性能路径走真实 chunked prefill + KV prune。配置 `configs/qwen0.5b_sparse_streaming_chunked.yaml`,结果将落 `results/m2d_streaming_chunked_s64_w1024_c512.json`。本地单测/编译已覆盖;A100 性能验收待跑该配置回填。
 
 ### M3 — 量化感知蒸馏
 - [ ] 蒸馏数据管道(教师 logits 缓存或在线前向)

@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import torch
 
-from lowbitsparse.eval import eval_wikitext2_ppl, profile_latency, profile_memory
+from lowbitsparse.eval import (
+    eval_wikitext2_ppl,
+    profile_chunked_prefill_latency,
+    profile_latency,
+    profile_memory,
+)
 from lowbitsparse.utils import get_logger
 
 from .apply import install_sparse_attention
@@ -59,6 +64,31 @@ def _run_latency_memory(model, tokenizer, seqlen: int, profile_cfg: dict,
         # (static cache 形状固定),故仅在 baseline 路径(past_pruner=None)生效。
         compile_decode=(profile_cfg.get("compile_decode", False)
                         and past_pruner is None),
+    )
+    mem = profile_memory()
+    return {"latency": lat, "memory": mem}
+
+
+def _run_chunked_prefill_latency_memory(model, tokenizer, seqlen: int,
+                                        sparse_cfg: SparseConfig,
+                                        profile_cfg: dict) -> dict:
+    """M2-d 性能路径:分块 prefill + StreamingLLM KV 裁剪。"""
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    profile_cfg = profile_cfg or {}
+
+    def pruner(past):
+        return prune_streaming_past_key_values(past, sparse_cfg)
+
+    lat = profile_chunked_prefill_latency(
+        model, tokenizer,
+        prefill_len=seqlen,
+        chunk_size=sparse_cfg.prefill_chunk_size,
+        decode_tokens=profile_cfg.get("decode_tokens", 128),
+        warmup=profile_cfg.get("warmup", 2),
+        repeats=profile_cfg.get("repeats", 5),
+        past_pruner=pruner,
+        reset_peak_after_prefill=profile_cfg.get("reset_peak_after_prefill", False),
     )
     mem = profile_memory()
     return {"latency": lat, "memory": mem}
@@ -114,6 +144,8 @@ def _sparse_config_payload(sparse_cfg: SparseConfig, lengths: tuple) -> dict:
         "block_size": sparse_cfg.block_size,
         "block_lookback": sparse_cfg.block_lookback,
         "cache_pruning": sparse_cfg.cache_pruning,
+        "chunked_prefill": getattr(sparse_cfg, "chunked_prefill", False),
+        "prefill_chunk_size": getattr(sparse_cfg, "prefill_chunk_size", 512),
         "ring_graph": getattr(sparse_cfg, "ring_graph", False),
         "benchmark_lengths": list(lengths),
     }
@@ -128,6 +160,9 @@ def benchmark_sparse_attention(model, tokenizer, sparse_cfg: SparseConfig,
     """
     if getattr(sparse_cfg, "ring_graph", False):
         return benchmark_streaming_ring_graph(
+            model, tokenizer, sparse_cfg, eval_cfg=eval_cfg, profile_cfg=profile_cfg)
+    if getattr(sparse_cfg, "chunked_prefill", False):
+        return benchmark_streaming_chunked_prefill(
             model, tokenizer, sparse_cfg, eval_cfg=eval_cfg, profile_cfg=profile_cfg)
     if sparse_cfg.cache_pruning:
         return benchmark_streaming_kv_pruning(
@@ -209,6 +244,62 @@ def benchmark_streaming_kv_pruning(model, tokenizer, sparse_cfg: SparseConfig,
         "quality_note": (
             "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;"
             "latency/memory 使用真实 KV cache 裁剪路径。"
+        ),
+        "rows": _rows_from_runs(baseline, sparse),
+    }
+
+
+def benchmark_streaming_chunked_prefill(model, tokenizer, sparse_cfg: SparseConfig,
+                                        eval_cfg: dict = None,
+                                        profile_cfg: dict = None) -> dict:
+    """M2-d:chunked prefill / local attention benchmark。
+
+    质量指标仍用 StreamingLLM additive mask 的 teacher-forced PPL 作参考;性能路径
+    不安装 4D additive mask,而是把 prefill 拆成多个 query chunk,chunk 之间真实裁剪
+    KV cache 到 sink+window。这样避免一次性构造完整 `[batch,1,q,kv]` mask/cache。
+    """
+    if sparse_cfg.mode != "streaming_llm":
+        raise ValueError("M2-d chunked_prefill 当前只支持 mode=streaming_llm")
+
+    lengths = tuple(sparse_cfg.benchmark_lengths)
+    baseline = []
+    for length in lengths:
+        log.info("[M2-d] baseline benchmark seqlen=%d", length)
+        baseline.append({"seqlen": length, **_run_one(model, tokenizer, length,
+                                                     eval_cfg, profile_cfg)})
+
+    # 质量:additive mask teacher-forced PPL,与 M2-b/M2-c/M2-e 口径一致。
+    patch = install_sparse_attention(model, sparse_cfg)
+    try:
+        sparse_ppl = []
+        for length in lengths:
+            log.info("[M2-d] sparse quality(reference mask) seqlen=%d", length)
+            sparse_ppl.append({"seqlen": length, "ppl": _run_ppl(model, tokenizer,
+                                                                 length, eval_cfg)})
+    finally:
+        patch.restore()
+
+    sparse = []
+    for item in sparse_ppl:
+        length = item["seqlen"]
+        log.info("[M2-d] chunked prefill latency seqlen=%d chunk=%d",
+                 length, sparse_cfg.prefill_chunk_size)
+        # chunked prefill 的 chunk 内部仍是 dense causal;为了让每块只看有限历史,
+        # chunk 间用同一 StreamingLLM 预算裁剪 cache。chunk_size 越小,越接近严格
+        # token 级 local attention,但 forward 次数越多。
+        sparse.append({
+            "seqlen": length,
+            "ppl": item["ppl"],
+            **_run_chunked_prefill_latency_memory(
+                model, tokenizer, length, sparse_cfg, profile_cfg),
+        })
+
+    return {
+        "sparse_config": _sparse_config_payload(sparse_cfg, lengths),
+        "benchmark_kind": "streaming_chunked_prefill",
+        "quality_note": (
+            "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;"
+            "latency/memory 使用 chunked prefill + StreamingLLM KV cache 裁剪路径。"
         ),
         "rows": _rows_from_runs(baseline, sparse),
     }

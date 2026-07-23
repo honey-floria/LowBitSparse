@@ -65,8 +65,11 @@ def _run_sparse(model, tok, cfg):
     from lowbitsparse.sparse.benchmark import benchmark_sparse_attention
 
     scfg = SparseConfig.from_dict(cfg.get("sparse", {}))
-    log.info("稀疏注意力配置: mode=%s, window=%d, sink=%d, block=%d, cache_pruning=%s",
-             scfg.mode, scfg.window_size, scfg.sink_size, scfg.block_size, scfg.cache_pruning)
+    log.info(
+        "稀疏注意力配置: mode=%s, window=%d, sink=%d, block=%d, "
+        "cache_pruning=%s, chunked_prefill=%s, ring_graph=%s",
+        scfg.mode, scfg.window_size, scfg.sink_size, scfg.block_size,
+        scfg.cache_pruning, scfg.chunked_prefill, scfg.ring_graph)
     return benchmark_sparse_attention(
         model, tok, scfg,
         eval_cfg=cfg.get("eval", {}),

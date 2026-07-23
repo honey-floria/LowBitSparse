@@ -4,6 +4,7 @@
 - `mode` 决定稀疏策略(sliding / streaming / block)。
 - `window_size` / `sink_size` / `block_size` 控制不同模式的可见范围。
 - `cache_pruning` 决定是否启用 M2-c 的 KV cache 真实裁剪路径。
+- `chunked_prefill` / `prefill_chunk_size` 控制 M2-d 的分块 prefill 路径。
 - `benchmark_lengths` 统一给 M2 benchmark 用,方便把 2k/4k/8k/16k 这组长度
   放进同一份 YAML 里复现。
 """
@@ -39,6 +40,8 @@ class SparseConfig:
         block_size:       block_sparse 的块边长。
         block_lookback:   块稀疏里向后保留几个块。
         cache_pruning:    是否启用 StreamingLLM KV cache 裁剪(M2-c)。
+        chunked_prefill:  是否启用 M2-d chunked prefill / local attention benchmark。
+        prefill_chunk_size: M2-d prefill 每次喂给模型的 query chunk 大小。
         ring_graph:       是否启用 M2-e 有界 ring-buffer KV cache + CUDA graph decode。
         benchmark_lengths: benchmark 统一评测的序列长度集合。
     """
@@ -49,6 +52,8 @@ class SparseConfig:
     block_size: int = 128
     block_lookback: int = 1
     cache_pruning: bool = False
+    chunked_prefill: bool = False
+    prefill_chunk_size: int = 512
     ring_graph: bool = False
     benchmark_lengths: tuple = (2048, 4096, 8192, 16384)
 
