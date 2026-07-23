@@ -39,12 +39,13 @@
 | **M2-c StreamingLLM KV prune** | Qwen2.5-0.5B-Instruct | 2026-07-22 重跑;新版 HF cache 兼容层生效,裁剪真实命中(applied_steps=903,kept_len=1088) | avg ΔPPL +0.841(16k +1.35,守 1.5 内) | 942.3 MB(不改权重) | prefill ~1.00x / decode 0.911x(未达 1.2x) | sparse 峰值**低于** baseline,省 24→361 MB(随长度增长) |
 | **M2-e ring-buffer + CUDA graph** ⭐ | Qwen2.5-0.5B-Instruct | ring cache 固定 sink+window=1088 + graph replay;2k/4k/8k/16k | avg ΔPPL +0.841(additive mask 参考,同 M2-c) | 942.3 MB(不改权重) | **decode ~5.3x(36→193 tok/s)**,与序列长度无关 | decode 峰值恒定 1088,省 18→327 MB(随长度增长) |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md` 与 `results/m2_sparse_*.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
 > **M2 口径说明**:M2 三行是 2k/4k/8k/16k 长序列均值,不是单一 seqlen=2048 PPL。当前 additive mask fallback 已跑通但未加速,其价值是后续 M2-c/M2-d 优化的负基线。
 > **M2-c 状态**(2026-07-22 更新):KV cache 裁剪代码与单测已落地,`profile_latency` 支持可选 `past_pruner` 和 `cache_position` 传递。新版 HF cache 容器兼容层(commit ccc8052/b28fdef)落地后重跑,裁剪**已真实生效**(applied_steps=903、全 24 层、kept_len=1088)。3 项验收 2 达标:ΔPPL ✅、peak memory ✅(转正节省),**decode speedup ❌(0.911x)** —— 结构性瓶颈(0.5B decode 受权重带宽而非 KV 限制),加速须转 M2-e。详见下方 M2-c 复盘条目。
+> **M2-e 状态**(2026-07-22 更新):ring-buffer + CUDA graph decode 已在 A100 集成 benchmark 跑通,平均 decode **5.331x**、cache 固定 1088、质量参考 ΔPPL +0.841。它是 benchmark proof:latency/memory 为真实 ring+graph 路径,quality 为 additive mask 参考;生产级 `generate()` 仍需 RoPE 相位忠实修正与 token parity 验证。
 
 ---
 

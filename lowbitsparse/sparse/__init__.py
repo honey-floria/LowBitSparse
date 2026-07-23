@@ -10,6 +10,7 @@ from .cache import (
     prune_tensor_cache,
     streaming_keep_indices,
 )
+from .ring_cache import RingKVCache, build_ring_graph_decode
 
 __all__ = [
     "SparseConfig",
@@ -24,4 +25,6 @@ __all__ = [
     "prune_streaming_past_key_values",
     "prune_tensor_cache",
     "streaming_keep_indices",
+    "RingKVCache",
+    "build_ring_graph_decode",
 ]

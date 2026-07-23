@@ -8,7 +8,8 @@ from lowbitsparse.sparse import (
     CachePruneStats, SparseConfig, build_sparse_attention_mask,
     install_sparse_attention, install_streaming_kv_pruning,
     prune_streaming_past_key_values,
-    sparse_density, sparse_visibility, streaming_keep_indices)
+    sparse_density, sparse_visibility, streaming_keep_indices,
+    RingKVCache, build_ring_graph_decode)
 
 
 def test_sliding_window_visibility():
@@ -228,7 +229,11 @@ def test_install_streaming_kv_pruning_layers_cache():
 
 
 # ---- M2-e RingKVCache(回绕 KV cache)----
-from lowbitsparse.sparse.ring_cache import RingKVCache
+
+
+def test_sparse_package_exports_m2e_api():
+    assert RingKVCache is not None
+    assert callable(build_ring_graph_decode)
 
 
 def test_ring_cache_prefill_returns_full_kv():
