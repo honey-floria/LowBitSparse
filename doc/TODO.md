@@ -68,7 +68,7 @@ LowBitSparse/
 │   │   ├── fake_linear.py       #   FakeQuantLinear:持有反量化权重,forward 走标准 matmul
 │   │   └── apply.py             #   遍历替换 Linear、按 method 路由、压缩比/等效 bit 统计
 │   ├── sparse/                  # 滑窗 / StreamingLLM / 块稀疏 注意力(M2)
-│   ├── distill/                 # QAT 蒸馏训练循环(M3,未落地)
+│   ├── distill/                 # QAT 蒸馏训练循环(M3,代码已落地,ablation pending)
 │   ├── eval/                    # 评测
 │   │   ├── ppl.py               #   WikiText-2 strided PPL
 │   │   └── profiler.py          #   prefill/decode 延迟、显存峰值
@@ -172,9 +172,9 @@ LowBitSparse/
       A100 回填:`results/m2d_streaming_chunked_s64_w1024_c512.json`。chunked 路径真实生效(`chunks=4/8/16/32`,`kept_len=1088`,`cache_position_passed=true`),平均显存节省 **2105.7MB**(16k 省 4846MB),ΔPPL +0.841 与 StreamingLLM 参考一致。但 prefill speedup 仅 **0.198x**、decode 0.901x,未达“不慢于 dense”目标。结论:保留为显存优先/超长上下文兜底路径,不是速度优化路径。
 
 ### M3 — 量化感知蒸馏
-- [ ] 蒸馏数据管道(教师 logits 缓存或在线前向)
-- [ ] KL + CE 损失 + 可选特征对齐
-- [ ] 训练循环:AMP、梯度检查点、checkpoint 到 Drive
+- [x] 蒸馏数据管道(在线 teacher 前向 + 固定窗口 token corpus)
+- [x] KL + CE 损失 + 可选特征对齐
+- [x] 训练循环:AMP、梯度检查点、checkpoint / result save
 - [ ] 消融:全参 vs 仅 scale vs LoRA;α/β 权重
 - [ ] **验收**:蒸馏 step vs PPL 恢复曲线
 

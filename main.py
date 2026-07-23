@@ -4,6 +4,7 @@
     python main.py eval   --config configs/qwen0.5b_base.yaml
     python main.py quant  --config configs/qwen0.5b_int4.yaml
     python main.py sparse --config configs/qwen0.5b_sparse_sliding.yaml
+    python main.py distill --config configs/qwen0.5b_distill.yaml
 
 torch、transformers、datasets 等重依赖延迟到子命令内部导入,
 保证本文件在 CPU-only 环境和轻量测试中仍可导入。
@@ -161,6 +162,18 @@ def cmd_sparse(args):
     log.info("结果已保存: %s", path)
 
 
+def cmd_distill(args):
+    """M3:量化感知蒸馏恢复精度。"""
+    from lowbitsparse.distill import run_distillation_from_config
+
+    cfg = load_config(args.config) if args.config else {}
+    set_seed(cfg.get("seed", 42))
+    results = run_distillation_from_config(cfg)
+    student_ppl = (results.get("student_final") or {}).get("ppl", {}).get("ppl")
+    if student_ppl is not None:
+        log.info("M3 完成: student_final PPL = %s", student_ppl)
+
+
 def _todo(name):
     """为已注册但尚未实现的里程碑命令构造占位处理函数。"""
     def _fn(args):
@@ -186,8 +199,8 @@ def build_parser():
     ps.set_defaults(func=cmd_sparse)
 
     sp = sub.add_parser("distill", help="M3: 量化感知蒸馏 (后续里程碑)")
-    sp.add_argument("--config", type=str, default=None)
-    sp.set_defaults(func=_todo("distill"))
+    sp.add_argument("--config", type=str, default="configs/qwen0.5b_distill.yaml")
+    sp.set_defaults(func=cmd_distill)
     return p
 
 
