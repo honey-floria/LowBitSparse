@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 压缩比 | 模型体积 / 平均比特数 | INT4 达到 ~3.5-4x 体积压缩 ✅ 达成(emb INT4 3.76x;emb INT8 2.99x 零精度代价,见 M1-g) |
 | 精度 | WikiText-2 PPL、下游任务 | INT4 PPL 退化 < 1.0(蒸馏后) |
-| 加速比 | 长序列 prefill / decode 延迟 | decode 已由 M2-e ring+graph 达成 ~5.3x;prefill 已有 M2-d chunked 路径(A100 数字待回填) |
+| 加速比 | 长序列 prefill / decode 延迟 | decode 已由 M2-e ring+graph 达成 ~5.3x;prefill M2-d 显存达标但速度负结果(0.198x) |
 | 恢复曲线 | 蒸馏 step vs PPL | 恢复 RTN-INT4 损失的 ≥ 60% |
 
 ### 1.3 里程碑(来自 README)
@@ -152,7 +152,7 @@ LowBitSparse/
 - [x] StreamingLLM(sink + 窗口)实现
 - [x] Block-sparse 实现(可选)
 - [x] 长序列基准:2k/4k/8k/16k 的 PPL 与延迟/显存(A100 已回填 `results/m2_*.json`)
-- [x] **验收**:加速比曲线 + 长文质量保持表(已回填;M2-e decode 达标,M2-d prefill 代码路径已完成/A100 数字待回填)
+- [x] **验收**:加速比曲线 + 长文质量保持表(已回填;M2-e decode 达标,M2-d prefill 显存达标但速度未达标)
 
 > 备注(2026-07-22 更新):M2-a/b 的 additive mask 路径确实没拿到加速(功能完成+负反馈),但这不是 M2 的终点。M2-c 让 KV 裁剪真实生效(显存转正,decode 仍不涨),**M2-e 最终翻案**:先用探针定量证明 decode 是 overhead-bound(非 KV-bound),再用有界 ring-buffer KV cache + CUDA graph 拿到 **decode ~5.3x + 恒定显存**。核心教训:小模型 decode 的瓶颈是 kernel launch overhead,加速来自 CUDA graph,稀疏(固定小 cache)是让 graph 在长序列下可行的使能条件,而非加速本身的来源。
 
@@ -168,7 +168,8 @@ LowBitSparse/
       **结果(decode 目标 ≥1.2x 大幅超标):2k/4k/8k/16k decode speedup 全部 ~5.3x(36→193 tok/s),显存恒定在 1088(省 18→327MB 随长度增长),ΔPPL 与 M2-c 一致守 1.5 内**。数据源 `results/m2e_streaming_ringgraph_s64_w1024.json`。关键洞察:decode 加速来自 CUDA graph 消 overhead,稀疏的作用是让固定形状 cache 在任意长序列下可行。范围为 Benchmark 证明(latency/memory 真实路径,quality 用 additive mask 参考,不做 RoPE 相位忠实修正)。
       代码:`lowbitsparse/sparse/ring_cache.py`、`scripts/cudagraph_probe.py --ring`、`configs/qwen0.5b_sparse_streaming_ringgraph.yaml`。
 - [x] **M2-d chunked prefill / local attention**:
-      实现 `profile_chunked_prefill_latency`:prefill 不再一次性喂完整长序列,而是按 `prefill_chunk_size` 拆 query chunk;chunk 之间用 StreamingLLM 规则真实裁剪 `past_key_values`,避免构造完整 `[batch,1,q,kv]` additive mask,并把长序列 cache 限制在 sink+window 量级。质量仍用 additive mask teacher-forced PPL 参考,性能路径走真实 chunked prefill + KV prune。配置 `configs/qwen0.5b_sparse_streaming_chunked.yaml`,结果将落 `results/m2d_streaming_chunked_s64_w1024_c512.json`。本地单测/编译已覆盖;A100 性能验收待跑该配置回填。
+      实现 `profile_chunked_prefill_latency`:prefill 不再一次性喂完整长序列,而是按 `prefill_chunk_size` 拆 query chunk;chunk 之间用 StreamingLLM 规则真实裁剪 `past_key_values`,避免构造完整 `[batch,1,q,kv]` additive mask,并把长序列 cache 限制在 sink+window 量级。质量仍用 additive mask teacher-forced PPL 参考,性能路径走真实 chunked prefill + KV prune。
+      A100 回填:`results/m2d_streaming_chunked_s64_w1024_c512.json`。chunked 路径真实生效(`chunks=4/8/16/32`,`kept_len=1088`,`cache_position_passed=true`),平均显存节省 **2105.7MB**(16k 省 4846MB),ΔPPL +0.841 与 StreamingLLM 参考一致。但 prefill speedup 仅 **0.198x**、decode 0.901x,未达“不慢于 dense”目标。结论:保留为显存优先/超长上下文兜底路径,不是速度优化路径。
 
 ### M3 — 量化感知蒸馏
 - [ ] 蒸馏数据管道(教师 logits 缓存或在线前向)

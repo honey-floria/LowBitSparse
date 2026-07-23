@@ -37,14 +37,16 @@
 | **M2 StreamingLLM s64 w1024** | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +0.841(质量最好) | 942.3 MB(不改权重) | prefill 0.659x / decode 0.871x | sparse 峰值平均 +170.5 MB |
 | M2 Block-sparse b128 l1 | Qwen2.5-0.5B-Instruct | additive mask fallback;2k/4k/8k/16k 均值 | 平均 ΔPPL +4.519 | 942.3 MB(不改权重) | prefill 0.656x / decode 0.869x | sparse 峰值平均 +170.0 MB |
 | **M2-c StreamingLLM KV prune** | Qwen2.5-0.5B-Instruct | 2026-07-22 重跑;新版 HF cache 兼容层生效,裁剪真实命中(applied_steps=903,kept_len=1088) | avg ΔPPL +0.841(16k +1.35,守 1.5 内) | 942.3 MB(不改权重) | prefill ~1.00x / decode 0.911x(未达 1.2x) | sparse 峰值**低于** baseline,省 24→361 MB(随长度增长) |
+| **M2-d chunked prefill c512** | Qwen2.5-0.5B-Instruct | prefill 拆 512-token chunk,chunk 间 KV prune,cache kept_len=1088 | avg ΔPPL +0.841(additive mask 参考) | 942.3 MB(不改权重) | prefill 0.198x / decode 0.901x(速度负结果) | sparse 峰值**显著低于** baseline,平均省 2105.7MB(16k 省 4846MB) |
 | **M2-e ring-buffer + CUDA graph** ⭐ | Qwen2.5-0.5B-Instruct | ring cache 固定 sink+window=1088 + graph replay;2k/4k/8k/16k | avg ΔPPL +0.841(additive mask 参考,同 M2-c) | 942.3 MB(不改权重) | **decode ~5.3x(36→193 tok/s)**,与序列长度无关 | decode 峰值恒定 1088,省 18→327 MB(随长度增长) |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2d_streaming_chunked_s64_w1024_c512.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
 > **M2 口径说明**:M2 三行是 2k/4k/8k/16k 长序列均值,不是单一 seqlen=2048 PPL。当前 additive mask fallback 已跑通但未加速,其价值是后续 M2-c/M2-d 优化的负基线。
 > **M2-c 状态**(2026-07-22 更新):KV cache 裁剪代码与单测已落地,`profile_latency` 支持可选 `past_pruner` 和 `cache_position` 传递。新版 HF cache 容器兼容层(commit ccc8052/b28fdef)落地后重跑,裁剪**已真实生效**(applied_steps=903、全 24 层、kept_len=1088)。3 项验收 2 达标:ΔPPL ✅、peak memory ✅(转正节省),**decode speedup ❌(0.911x)** —— 结构性瓶颈(0.5B decode 受权重带宽而非 KV 限制),加速须转 M2-e。详见下方 M2-c 复盘条目。
+> **M2-d 状态**(2026-07-23 更新):chunked prefill + KV prune 已在 A100 跑通,cache 稳定裁到 1088,平均省显存 2.1GB(16k 省 4.85GB),但 prefill 仅 0.198x,dense 已很快而 chunked 多次 forward/裁剪开销太重。定位为显存优先兜底路径,非速度路径。
 > **M2-e 状态**(2026-07-22 更新):ring-buffer + CUDA graph decode 已在 A100 集成 benchmark 跑通,平均 decode **5.331x**、cache 固定 1088、质量参考 ΔPPL +0.841。它是 benchmark proof:latency/memory 为真实 ring+graph 路径,quality 为 additive mask 参考;生产级 `generate()` 仍需 RoPE 相位忠实修正与 token parity 验证。
 
 ---
@@ -452,7 +454,7 @@
 
 **验证**:CPU 单测 5 passed(回绕槽位/恒定形状/sink 保留/长度封顶/reset);A100 门控 `--ring` 不崩 + 5.2x + 显存恒定;集成 benchmark 四长度全 `available: True`。
 
-**遗留 / 边界**:①未做 RoPE 相位忠实修正,graph 路径不保证生成 token 正确性(仅测速/测显存);要用于 `generate()` 需补 re-rotation。②M2-e 只解决 decode 侧;prefill 已由 M2-d 提供 chunked benchmark 路径,仍待 A100 数字回填。③16k 的 ΔPPL +1.354 接近 1.5 阈值,window/sink 再缩或序列再长需留意质量。
+**遗留 / 边界**:①未做 RoPE 相位忠实修正,graph 路径不保证生成 token 正确性(仅测速/测显存);要用于 `generate()` 需补 re-rotation。②M2-e 只解决 decode 侧;prefill 已由 M2-d 回填:显存达标但速度为负结果(0.198x),定位为显存优先兜底路径。③16k 的 ΔPPL +1.354 接近 1.5 阈值,window/sink 再缩或序列再长需留意质量。
 
 **结论**:M2 翻案成功——从"功能完成+零加速"到 **decode 5.3x + 恒定显存**。小模型 decode 的瓶颈是 kernel launch overhead,CUDA graph 是解药,ring-buffer 是使能条件。M2 里程碑核心结论闭合。
 
@@ -465,10 +467,18 @@
 - `benchmark_streaming_chunked_prefill` 新增 M2-d benchmark 分支:baseline 仍跑 dense;质量仍用 StreamingLLM additive mask 的 teacher-forced PPL 参考;latency/memory 走真实 chunked prefill + KV prune。
 - 新增配置 `configs/qwen0.5b_sparse_streaming_chunked.yaml`,默认 sink=64、window=1024、chunk=512。
 
-**验证**:
-- 本地编译与 `tests/test_sparse.py` 覆盖配置解析、chunk 计数、cache_position 透传和裁剪命中。
-- A100 性能数字尚未回填;下一步跑 `python main.py sparse --config configs/qwen0.5b_sparse_streaming_chunked.yaml`,生成 `results/m2d_streaming_chunked_s64_w1024_c512.json` 后再补速查表。
+**A100 结果**(`results/m2d_streaming_chunked_s64_w1024_c512.json`):
 
-**边界**:chunk 内部仍走模型原生 dense causal attention,严格 StreamingLLM 局部性只在 chunk 边界兑现;`prefill_chunk_size` 越小越接近 token 级 local attention,但 forward 次数越多。M2-d 解决的是 prefill 显存/完整 mask 问题,decode 加速仍以 M2-e ring+graph 为主。
+| seqlen | ΔPPL | prefill speedup | decode speedup | mem saved | chunks |
+| --- | --- | --- | --- | --- | --- |
+| 2048 | +0.242 | 0.249x | 0.899x | +330.9 MB | 4 |
+| 4096 | +0.707 | 0.171x | 0.915x | +980.3 MB | 8 |
+| 8192 | +1.061 | 0.183x | 0.895x | +2265.7 MB | 16 |
+| 16384 | +1.354 | 0.189x | 0.895x | +4846.0 MB | 32 |
+| **均值** | **+0.841** | **0.198x** | **0.901x** | **+2105.7 MB** | — |
+
+chunked 统计:`chunk_size=512`、`cache_position_passed=true`、`kept_len=1088`、全程 chunk 间裁剪命中。
+
+**结论 / 边界**:M2-d 达成显存目标,但速度是负结果。chunk 内部仍走模型原生 dense causal attention,严格 StreamingLLM 局部性只在 chunk 边界兑现;`prefill_chunk_size` 越小越接近 token 级 local attention,但 forward 次数越多。Qwen2.5-0.5B 在 A100 上 dense prefill 已很快,拆成多次 forward + 每层 cache 裁剪的开销盖过收益。M2-d 保留为显存优先/超长上下文兜底路径;速度结论仍以 M2-e ring+graph decode 为主。
 
 <!-- 后续条目在此追加,遵循上方模板 -->
