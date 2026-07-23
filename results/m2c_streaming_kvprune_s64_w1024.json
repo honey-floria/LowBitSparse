@@ -1,7 +1,7 @@
 {
   "exp_id": "m2c_streaming_kvprune_s64_w1024",
   "env": {
-    "timestamp": "2026-07-22T11:55:00.174608+00:00",
+    "timestamp": "2026-07-23T03:19:29.433705+00:00",
     "torch": "2.11.0+cu128",
     "cuda": "12.8",
     "gpu": "NVIDIA A100-SXM4-40GB"
@@ -52,6 +52,9 @@
     "block_size": 128,
     "block_lookback": 1,
     "cache_pruning": true,
+    "chunked_prefill": false,
+    "prefill_chunk_size": 512,
+    "ring_graph": false,
     "benchmark_lengths": [
       2048,
       4096,
@@ -75,8 +78,8 @@
         "latency": {
           "prefill_len": 2048,
           "decode_tokens": 128,
-          "prefill_ms_median": 32.157,
-          "decode_tps_median": 37.94
+          "prefill_ms_median": 32.541,
+          "decode_tps_median": 37.15
         },
         "memory": {
           "peak_mb": 1602.808,
@@ -94,8 +97,8 @@
         "latency": {
           "prefill_len": 2048,
           "decode_tokens": 128,
-          "prefill_ms_median": 32.277,
-          "decode_tps_median": 34.4,
+          "prefill_ms_median": 32.564,
+          "decode_tps_median": 33.6,
           "cache_pruning": {
             "applied_steps": 903,
             "last": {
@@ -116,8 +119,8 @@
         }
       },
       "speedup": {
-        "prefill": 0.996,
-        "decode": 0.907
+        "prefill": 0.999,
+        "decode": 0.904
       },
       "memory_delta_mb": 23.999
     },
@@ -134,8 +137,8 @@
         "latency": {
           "prefill_len": 4096,
           "decode_tokens": 128,
-          "prefill_ms_median": 46.098,
-          "decode_tps_median": 37.57
+          "prefill_ms_median": 45.841,
+          "decode_tps_median": 37.28
         },
         "memory": {
           "peak_mb": 2248.73,
@@ -153,8 +156,8 @@
         "latency": {
           "prefill_len": 4096,
           "decode_tokens": 128,
-          "prefill_ms_median": 46.017,
-          "decode_tps_median": 34.38,
+          "prefill_ms_median": 45.891,
+          "decode_tps_median": 33.67,
           "cache_pruning": {
             "applied_steps": 903,
             "last": {
@@ -175,8 +178,8 @@
         }
       },
       "speedup": {
-        "prefill": 1.002,
-        "decode": 0.915
+        "prefill": 0.999,
+        "decode": 0.903
       },
       "memory_delta_mb": 75.906
     },
@@ -193,8 +196,8 @@
         "latency": {
           "prefill_len": 8192,
           "decode_tokens": 128,
-          "prefill_ms_median": 100.501,
-          "decode_tps_median": 37.82
+          "prefill_ms_median": 100.464,
+          "decode_tps_median": 37.12
         },
         "memory": {
           "peak_mb": 3527.166,
@@ -212,8 +215,8 @@
         "latency": {
           "prefill_len": 8192,
           "decode_tokens": 128,
-          "prefill_ms_median": 100.185,
-          "decode_tps_median": 34.62,
+          "prefill_ms_median": 100.317,
+          "decode_tps_median": 33.61,
           "cache_pruning": {
             "applied_steps": 903,
             "last": {
@@ -234,8 +237,8 @@
         }
       },
       "speedup": {
-        "prefill": 1.003,
-        "decode": 0.915
+        "prefill": 1.001,
+        "decode": 0.905
       },
       "memory_delta_mb": 168.311
     },
@@ -252,8 +255,8 @@
         "latency": {
           "prefill_len": 16384,
           "decode_tokens": 128,
-          "prefill_ms_median": 221.011,
-          "decode_tps_median": 37.53
+          "prefill_ms_median": 219.724,
+          "decode_tps_median": 36.84
         },
         "memory": {
           "peak_mb": 6093.46,
@@ -271,8 +274,8 @@
         "latency": {
           "prefill_len": 16384,
           "decode_tokens": 128,
-          "prefill_ms_median": 219.084,
-          "decode_tps_median": 34.03,
+          "prefill_ms_median": 221.209,
+          "decode_tps_median": 33.67,
           "cache_pruning": {
             "applied_steps": 903,
             "last": {
@@ -293,8 +296,8 @@
         }
       },
       "speedup": {
-        "prefill": 1.009,
-        "decode": 0.907
+        "prefill": 0.993,
+        "decode": 0.914
       },
       "memory_delta_mb": 360.542
     }
