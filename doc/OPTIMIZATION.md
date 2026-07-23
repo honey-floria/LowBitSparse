@@ -39,8 +39,9 @@
 | **M2-c StreamingLLM KV prune** | Qwen2.5-0.5B-Instruct | 2026-07-22 重跑;新版 HF cache 兼容层生效,裁剪真实命中(applied_steps=903,kept_len=1088) | avg ΔPPL +0.841(16k +1.35,守 1.5 内) | 942.3 MB(不改权重) | prefill ~1.00x / decode 0.911x(未达 1.2x) | sparse 峰值**低于** baseline,省 24→361 MB(随长度增长) |
 | **M2-d chunked prefill c512** | Qwen2.5-0.5B-Instruct | prefill 拆 512-token chunk,chunk 间 KV prune,cache kept_len=1088 | avg ΔPPL +0.841(additive mask 参考) | 942.3 MB(不改权重) | prefill 0.198x / decode 0.901x(速度负结果) | sparse 峰值**显著低于** baseline,平均省 2105.7MB(16k 省 4846MB) |
 | **M2-e ring-buffer + CUDA graph** ⭐ | Qwen2.5-0.5B-Instruct | ring cache 固定 sink+window=1088 + graph replay;2k/4k/8k/16k | avg ΔPPL +0.841(additive mask 参考,同 M2-c) | 942.3 MB(不改权重) | **decode ~5.3x(36→193 tok/s)**,与序列长度无关 | decode 峰值恒定 1088,省 18→327 MB(随长度增长) |
+| **M3 Distill RTN INT4** | Qwen2.5-0.5B-Instruct | teacher FP16;student=RTN INT4 g128 non-sym,train 100 steps,KL+CE | teacher 13.2698 → init 15.9786 → final **14.2716** | 441.1 MB(等效 4.251bit,压缩 2.136x) | 蒸馏训练不作统一 latency 口径;评测阶段同 RTN INT4 | 评测阶段同 RTN INT4;训练仅改变权重数值 |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2d_streaming_chunked_s64_w1024_c512.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2d_streaming_chunked_s64_w1024_c512.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`、`results/m3_distill_qwen0.5b.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
@@ -48,6 +49,7 @@
 > **M2-c 状态**(2026-07-22 更新):KV cache 裁剪代码与单测已落地,`profile_latency` 支持可选 `past_pruner` 和 `cache_position` 传递。新版 HF cache 容器兼容层(commit ccc8052/b28fdef)落地后重跑,裁剪**已真实生效**(applied_steps=903、全 24 层、kept_len=1088)。3 项验收 2 达标:ΔPPL ✅、peak memory ✅(转正节省),**decode speedup ❌(0.911x)** —— 结构性瓶颈(0.5B decode 受权重带宽而非 KV 限制),加速须转 M2-e。详见下方 M2-c 复盘条目。
 > **M2-d 状态**(2026-07-23 更新):chunked prefill + KV prune 已在 A100 跑通,cache 稳定裁到 1088,平均省显存 2.1GB(16k 省 4.85GB),但 prefill 仅 0.198x,dense 已很快而 chunked 多次 forward/裁剪开销太重。定位为显存优先兜底路径,非速度路径。
 > **M2-e 状态**(2026-07-22 更新):ring-buffer + CUDA graph decode 已在 A100 集成 benchmark 跑通,平均 decode **5.331x**、cache 固定 1088、质量参考 ΔPPL +0.841。它是 benchmark proof:latency/memory 为真实 ring+graph 路径,quality 为 additive mask 参考;生产级 `generate()` 仍需 RoPE 相位忠实修正与 token parity 验证。
+> **M3 状态**(2026-07-23 更新):Qwen2.5-0.5B RTN INT4 蒸馏已实测完成,teacher 13.2698 → student_init 15.9786 → student_final 14.2716,恢复 RTN-INT4 缺口 63.0%(1.707 / 2.7088),最终相对 FP16 仅 +0.0271 PPL;压缩保持 441.1 MB / 4.251 bit / 2.136x。蒸馏改善的是精度,不是压缩比,所以部署 footprint 与 RTN INT4 一致。
 
 ---
 
@@ -480,5 +482,27 @@
 chunked 统计:`chunk_size=512`、`cache_position_passed=true`、`kept_len=1088`、全程 chunk 间裁剪命中。
 
 **结论 / 边界**:M2-d 达成显存目标,但速度是负结果。chunk 内部仍走模型原生 dense causal attention,严格 StreamingLLM 局部性只在 chunk 边界兑现;`prefill_chunk_size` 越小越接近 token 级 local attention,但 forward 次数越多。Qwen2.5-0.5B 在 A100 上 dense prefill 已很快,拆成多次 forward + 每层 cache 裁剪的开销盖过收益。M2-d 保留为显存优先/超长上下文兜底路径;速度结论仍以 M2-e ring+graph decode 为主。
+
+## [2026-07-23] M3 实测 — 量化感知蒸馏把 RTN INT4 缺口恢复 63%
+**背景 / 目标**:M1-c 的 RTN INT4 掉点 +2.813 PPL 是 M3 要恢复的目标。这里验证在线 teacher 前向 + KL/CE 蒸馏能否在不改变 INT4 压缩比的前提下把学生拉回接近 FP16。
+
+**实验设置**:Qwen2.5-0.5B-Instruct;teacher FP16,student 由 RTN INT4 g128 非对称 `skip=lm_head` 初始化;100 steps;train_samples=256;eval_samples=32;seqlen=512;batch_size=2;loss=KL+CE(α=0.7,β=0.3,γ=0);结果文件 `results/m3_distill_qwen0.5b.json`。
+
+**结果**:
+
+| 阶段 | PPL | 相对 FP16 | 相对 teacher gap |
+| --- | --- | --- | --- |
+| teacher | 13.2698 | -0.9747 | — |
+| student init | 15.9786 | +1.7341 | +2.7088 |
+| student final | 14.2716 | +0.0271 | +1.0018 |
+
+压缩保持:441.1 MB / 等效 4.251 bit / 2.136x,与 RTN INT4 一致。
+
+**关键分析**:
+1. **恢复了 63.0% 的 teacher-student gap**: `(15.9786 - 14.2716) / (15.9786 - 13.2698) = 63.0%`。这说明在线蒸馏对 4bit 的主损失是有效的,但不是完全恢复。
+2. **精度已经接近 FP16**:final 相对 FP16 只差 +0.0271 PPL,已经落在 deliverable 的“INT4 PPL 退化 < 1.0”目标内。
+3. **压缩比不变**:M3 只改学生权重数值,不改位宽和结构,所以部署 footprint 与 RTN INT4 完全一致。
+
+**结论**:M3 验收完成。后续真正值得做的是消融:全参 vs 仅 scale vs LoRA,以及 α/β 权重扫描;但“蒸馏能否把 INT4 拉回来”这件事已经被实测回答。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

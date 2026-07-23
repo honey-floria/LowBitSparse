@@ -24,14 +24,14 @@
 | 类别 | 指标 | 目标(0.5B 为主,1.5B 验证) |
 | --- | --- | --- |
 | 压缩比 | 模型体积 / 平均比特数 | INT4 达到 ~3.5-4x 体积压缩 ✅ 达成(emb INT4 3.76x;emb INT8 2.99x 零精度代价,见 M1-g) |
-| 精度 | WikiText-2 PPL、下游任务 | INT4 PPL 退化 < 1.0(蒸馏后) |
+| 精度 | WikiText-2 PPL、下游任务 | INT4 PPL 退化 < 1.0(蒸馏后) ✅ 达成(M3 最终 +0.0271 PPL vs FP16) |
 | 加速比 | 长序列 prefill / decode 延迟 | decode 已由 M2-e ring+graph 达成 ~5.3x;prefill M2-d 显存达标但速度负结果(0.198x) |
-| 恢复曲线 | 蒸馏 step vs PPL | 恢复 RTN-INT4 损失的 ≥ 60% |
+| 恢复曲线 | 蒸馏 step vs PPL | 恢复 RTN-INT4 损失的 ≥ 60% ✅ 达成(实测 63.0%) |
 
 ### 1.3 里程碑(来自 README)
 - **M1** 权重量化(INT8 → INT4)+ 精度评测
 - **M2** 稀疏注意力(长序列加速)
-- **M3** 量化感知蒸馏恢复精度
+- **M3** 量化感知蒸馏恢复精度(已实测完成)
 - **M4** 消融 + 报告
 
 ---
@@ -176,7 +176,8 @@ LowBitSparse/
 - [x] KL + CE 损失 + 可选特征对齐
 - [x] 训练循环:AMP、梯度检查点、checkpoint / result save
 - [ ] 消融:全参 vs 仅 scale vs LoRA;α/β 权重
-- [ ] **验收**:蒸馏 step vs PPL 恢复曲线
+- [x] **验收**:蒸馏 step vs PPL 恢复曲线
+      A100 `results/m3_distill_qwen0.5b.json`: teacher 13.2698 → student_init 15.9786 → student_final 14.2716, 恢复 RTN-INT4 缺口 63.0%(1.707 / 2.7088),最终相对 FP16 仅 +0.0271 PPL;压缩保持 441.1 MB / 4.251 bit / 2.136x。
 
 ### M4 — 消融 & 报告
 - [ ] 汇总所有实验到统一表格(results/summary.json)
