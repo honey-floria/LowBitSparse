@@ -1,0 +1,204 @@
+{
+  "exp_id": "m3_distill_qwen0.5b_smoke",
+  "env": {
+    "timestamp": "2026-07-23T07:49:11.434437+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "exp_id": "m3_distill_qwen0.5b_smoke",
+    "out_dir": "results",
+    "seed": 42,
+    "teacher": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "student": {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "quant": {
+      "n_bits": 4,
+      "group_size": 128,
+      "symmetric": false,
+      "method": "rtn",
+      "skip": [
+        "lm_head"
+      ],
+      "calib_n_samples": 128,
+      "calib_seqlen": 512,
+      "quant_embedding": false,
+      "embedding_bits": null
+    },
+    "dataset_id": "Salesforce/wikitext",
+    "dataset_config": "wikitext-2-raw-v1",
+    "train_split": "train",
+    "eval_split": "validation",
+    "seqlen": 512,
+    "train_samples": 32,
+    "eval_samples": 8,
+    "batch_size": 2,
+    "max_steps": 10,
+    "eval_every": 5,
+    "log_every": 2,
+    "lr": 5e-05,
+    "weight_decay": 0.0,
+    "betas": [
+      0.9,
+      0.95
+    ],
+    "grad_clip": 1.0,
+    "temperature": 2.0,
+    "alpha_kd": 0.7,
+    "beta_ce": 0.3,
+    "gamma_hidden": 0.0,
+    "use_amp": true,
+    "gradient_checkpointing": false,
+    "save_student_path": "results/m3_distill_smoke.pt"
+  },
+  "teacher": {
+    "size": {
+      "params": 494032768,
+      "params_millions": 494.033,
+      "bytes": 988065536,
+      "size_mb": 942.293
+    },
+    "ppl": {
+      "ppl": 13.3013,
+      "seqlen": 512,
+      "stride": 512,
+      "n_tokens": 4096
+    }
+  },
+  "student_init": {
+    "size": {
+      "params": 494032768,
+      "params_millions": 494.033,
+      "bytes": 1703773952,
+      "size_mb": 1624.845
+    },
+    "ppl": {
+      "ppl": 33.4224,
+      "seqlen": 512,
+      "stride": 512,
+      "n_tokens": 4096
+    }
+  },
+  "student_final": {
+    "ppl": {
+      "ppl": 33.4224,
+      "seqlen": 512,
+      "stride": 512,
+      "n_tokens": 4096
+    }
+  },
+  "compression": {
+    "quant_weights": 357826560,
+    "effective_bits": 4.251,
+    "size_mb": 441.082
+  },
+  "history": [
+    {
+      "step": 0,
+      "loss": null,
+      "kd": null,
+      "ce": null,
+      "feat": null,
+      "ppl": 33.4224,
+      "seqlen": 512,
+      "stride": 512,
+      "n_tokens": 4096
+    },
+    {
+      "step": 1,
+      "loss": 616.3683471679688,
+      "kd": 878.602783203125,
+      "ce": 4.488038063049316,
+      "feat": 0.0,
+      "grad_norm": NaN
+    },
+    {
+      "step": 2,
+      "loss": 749.383056640625,
+      "kd": 1069.13720703125,
+      "ce": 3.2900314331054688,
+      "feat": 0.0,
+      "grad_norm": NaN
+    },
+    {
+      "step": 3,
+      "loss": 634.6921997070312,
+      "kd": 904.773681640625,
+      "ce": 4.5021185874938965,
+      "feat": 0.0,
+      "grad_norm": NaN
+    },
+    {
+      "step": 4,
+      "loss": 734.3779296875,
+      "kd": 1047.4549560546875,
+      "ce": 3.864997386932373,
+      "feat": 0.0,
+      "grad_norm": NaN
+    },
+    {
+      "step": 5,
+      "loss": 679.1290283203125,
+      "kd": 968.5018310546875,
+      "ce": 3.9257192611694336,
+      "feat": 0.0,
+      "grad_norm": NaN,
+      "ppl": 33.4224,
+      "seqlen": 512,
+      "stride": 512,
+      "n_tokens": 4096
+    },
+    {
+      "step": 6,
+      "loss": 607.27001953125,
+      "kd": 865.7092895507812,
+      "ce": 4.245037078857422,
+      "feat": 0.0,
+      "grad_norm": NaN
+    },
+    {
+      "step": 7,
+      "loss": 631.6708984375,
+      "kd": 900.631103515625,
+      "ce": 4.097067356109619,
+      "feat": 0.0,
+      "grad_norm": NaN
+    },
+    {
+      "step": 8,
+      "loss": 677.3897705078125,
+      "kd": 965.864501953125,
+      "ce": 4.282080173492432,
+      "feat": 0.0,
+      "grad_norm": Infinity
+    },
+    {
+      "step": 9,
+      "loss": 718.9955444335938,
+      "kd": 1025.51904296875,
+      "ce": 3.77406907081604,
+      "feat": 0.0,
+      "grad_norm": Infinity
+    },
+    {
+      "step": 10,
+      "loss": 735.1648559570312,
+      "kd": 1048.811767578125,
+      "ce": 3.3221595287323,
+      "feat": 0.0,
+      "grad_norm": Infinity,
+      "ppl": 33.4224,
+      "seqlen": 512,
+      "stride": 512,
+      "n_tokens": 4096
+    }
+  ]
+}
