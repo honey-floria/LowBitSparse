@@ -89,6 +89,18 @@ class DistillConfig:
     # hidden-state MSE 权重。0 表示关闭特征对齐；>0 时 forward 会请求 hidden states，
     # 显存和时间都会增加，且 teacher/student  hidden 维度必须一致。
     gamma_hidden: float = 0.0
+    # 蒸馏参数训练形态:
+    # - full: 训练每个 fake-quant Linear/Embedding 的完整 FP32 主权重,精度恢复能力最强,
+    #         但显存/优化器状态最大;这是 M3 首次实测采用的默认口径。
+    # - scale: 冻结量化初始化权重,只训练每个输出通道一个乘性 scale,参数量最小,
+    #          用于回答“仅训 scale 能恢复多少量化误差”。
+    # - lora: 冻结量化初始化权重,只训练低秩 A/B 适配器,导出时把 delta 折叠回权重,
+    #         参数量介于 scale 与 full 之间。
+    train_mode: str = "full"
+    # LoRA rank,仅在 train_mode="lora" 时生效。rank 越大容量越强、显存越高。
+    lora_rank: int = 8
+    # LoRA 缩放系数,实际 delta 乘以 `lora_alpha / lora_rank`。
+    lora_alpha: float = 16.0
     # 是否启用 CUDA autocast。CUDA 上优先 BF16；若只能 FP16，训练 loop 会启用
     # GradScaler。CPU 下该开关自动失效。
     use_amp: bool = True

@@ -505,6 +505,31 @@ chunked 统计:`chunk_size=512`、`cache_position_passed=true`、`kept_len=1088`
 
 **结论**:M3 验收完成。后续真正值得做的是消融:全参 vs 仅 scale vs LoRA,以及 α/β 权重扫描;但“蒸馏能否把 INT4 拉回来”这件事已经被实测回答。
 
+## [2026-07-24] M3 消融能力落地 — full / scale / LoRA × α/β
+**背景 / 目标**:补齐 M3 的结构消融和损失权重消融,回答“恢复精度来自训练容量,还是来自 KL/CE 配比”。
+
+**方案**:
+- `DistillConfig` 新增 `train_mode`、`lora_rank`、`lora_alpha`。
+- `DistillLinear` 支持三种训练形态:
+  - `full`:训练完整 FP32 主权重,即 M3 首次实测口径。
+  - `scale`:冻结量化初始化权重,只训练每个输出通道一个乘性 scale。
+  - `lora`:冻结量化初始化权重,训练低秩 A/B adapter,导出时把 `B @ A * alpha/rank` 折叠回权重。
+- 结果 JSON 新增 `trainable` 字段,记录可训练参数量、logical tensor 规模和可训练比例。
+- 新增 `scripts/run_m3_ablation.py`,默认跑 `full/scale/lora × (α,β)=(0.7,0.3),(1.0,0.0),(0.5,0.5)`,并生成 `results/m3_ablation_summary.json/md`。
+- `scripts/build_m4_report.py` 已兼容 `m3_ablate_*.json`,跑完消融后会在 `results/report.md` 自动补 M3 消融表。
+
+**验证**:
+- `python -m pytest -q tests/test_distill.py` 5 passed。
+- `python -m pytest -q` 41 passed。
+- 本地 CPU 环境不跑 Qwen A100 正式消融;A100 运行命令:
+
+```bash
+python scripts/run_m3_ablation.py
+python scripts/build_m4_report.py
+```
+
+**结论 & 下一步**:M3 消融代码链路已完成。正式数值需要在 Colab A100 上跑 `run_m3_ablation.py`;如果时间紧,先跑 `--modes scale lora --loss-grid 0.7:0.3` 与已有 full 结果对比。
+
 ## [2026-07-24] M4 — 汇总报告生成与组合结论收口
 **背景 / 目标**:M4 要把 M0/M1/M2/M3 的结果汇总成统一机器可读表和最终报告,并给出量化、稀疏、蒸馏三类曲线与组合结论。
 

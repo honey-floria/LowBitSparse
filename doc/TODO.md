@@ -79,6 +79,7 @@ LowBitSparse/
 ├── scripts/                     # 一键脚本 & Colab notebook
 │   ├── cpu_smoke.py             #   CPU 秒级冒烟:步骤1-7 演示量化数学+校准流水线(无下载)
 │   ├── run_sweep.py             #   method×bit×group_size 全组合扫描,落盘 json
+│   ├── run_m3_ablation.py       #   M3 full/scale/LoRA × α/β 消融
 │   ├── summarize.py             #   汇总 results/*.json 为验收表格(含 ΔPPL)
 │   ├── build_m4_report.py       #   汇总 M0-M3 JSON,生成 M4 summary/report
 │   └── run.ipynb                #   Colab:挂 Drive、装依赖、跑 M0/M1/M2/M2-c/M2-d/M2-e
@@ -179,7 +180,9 @@ LowBitSparse/
 - [x] 蒸馏数据管道(在线 teacher 前向 + 固定窗口 token corpus)
 - [x] KL + CE 损失 + 可选特征对齐
 - [x] 训练循环:AMP、梯度检查点、checkpoint / result save
-- [ ] 消融:全参 vs 仅 scale vs LoRA;α/β 权重
+- [x] 消融:全参 vs 仅 scale vs LoRA;α/β 权重
+      已实现 `train_mode=full|scale|lora`、LoRA rank/alpha 配置、可训练参数统计、
+      一键脚本 `scripts/run_m3_ablation.py`;A100 实测后自动生成 `results/m3_ablation_summary.{json,md}`。
 - [x] **验收**:蒸馏 step vs PPL 恢复曲线
       A100 `results/m3_distill_qwen0.5b.json`: teacher 13.2698 → student_init 15.9786 → student_final 14.2716, 恢复 RTN-INT4 缺口 63.0%(1.707 / 2.7088),最终相对 FP16 仅 +0.0271 PPL;压缩保持 441.1 MB / 4.251 bit / 2.136x。
 

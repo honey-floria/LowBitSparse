@@ -31,6 +31,34 @@ from .modules import export_distill_student, prepare_distill_student
 log = get_logger()
 
 
+def _trainable_report(model) -> dict:
+    """统计 student 当前可训练参数量。
+
+    返回:
+        trainable_params: requires_grad=True 的参数总数。
+        param_tensors:    模型 parameter 总数。
+        buffer_tensors:   模型 buffer 总数，包含 scale/LoRA 模式冻结的基础权重。
+        logical_tensors:  parameters + buffers，作为消融时的模型张量规模近似。
+        trainable_pct:    可训练参数占 logical_tensors 的比例。
+
+    用途:
+        M3 消融需要横向比较 full / scale / LoRA 的训练成本；这里把参数量
+        写进结果 JSON，避免只看 PPL 而忽略优化器状态和显存差异。
+    """
+    param_total = sum(p.numel() for p in model.parameters())
+    buffer_total = sum(b.numel() for b in model.buffers())
+    total = param_total + buffer_total
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    pct = (trainable / total * 100.0) if total else 0.0
+    return {
+        "trainable_params": int(trainable),
+        "param_tensors": int(param_total),
+        "buffer_tensors": int(buffer_total),
+        "logical_tensors": int(total),
+        "trainable_pct": round(pct, 4),
+    }
+
+
 def _forward_outputs(model, input_ids, output_hidden_states: bool = False):
     """兼容 HF / toy 模型的 forward 调用。
 
@@ -373,8 +401,16 @@ def run_distillation_from_config(cfg_dict: dict) -> dict:
         teacher_ppl = eval_evaluator(teacher)
 
     qcfg = cfg.quant
-    student, replaced = prepare_distill_student(student, qcfg)
-    log.info("[M3] student prepared: replaced=%d, quant=%s", replaced, qcfg)
+    student, replaced = prepare_distill_student(
+        student, qcfg,
+        train_mode=cfg.train_mode,
+        lora_rank=cfg.lora_rank,
+        lora_alpha=cfg.lora_alpha,
+    )
+    trainable = _trainable_report(student)
+    log.info("[M3] student prepared: replaced=%d, mode=%s, trainable=%d (%.4f%%), quant=%s",
+             replaced, cfg.train_mode, trainable["trainable_params"],
+             trainable["trainable_pct"], qcfg)
 
     student_base = model_size_report(student)
     student_init_ppl = eval_evaluator(student)
@@ -407,6 +443,7 @@ def run_distillation_from_config(cfg_dict: dict) -> dict:
         "config": cfg.to_dict(),
         "teacher": {"size": teacher_base, "ppl": teacher_ppl},
         "student_init": {"size": student_base, "ppl": student_init_ppl},
+        "trainable": trainable,
         "student_final": {"ppl": student_final_ppl},
         "compression": compression,
         **train_result,

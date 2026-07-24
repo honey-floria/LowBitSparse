@@ -169,11 +169,16 @@ def _summarize_distill(items: dict[str, dict[str, Any]]) -> list[dict[str, Any]]
         rows.append({
             "exp_id": exp_id,
             "path": data["_path"],
+            "train_mode": data.get("config", {}).get("train_mode"),
+            "alpha_kd": data.get("config", {}).get("alpha_kd"),
+            "beta_ce": data.get("config", {}).get("beta_ce"),
             "teacher_ppl": teacher_ppl,
             "student_init_ppl": init_ppl,
             "student_final_ppl": final_ppl,
             "gap_recovered": _round(recovered, 4),
             "gap_recovered_pct": _round(recovered * 100, 2) if recovered is not None else None,
+            "trainable_params": data.get("trainable", {}).get("trainable_params"),
+            "trainable_pct": data.get("trainable", {}).get("trainable_pct"),
             "size_mb": size_quant,
             "effective_bits": comp.get("effective_bits"),
             "compression_ratio": _round(ratio, 3),
@@ -296,10 +301,24 @@ def _render_report(summary: dict[str, Any]) -> str:
             _fmt(row["avg_memory_delta_mb"], 1),
         ])
 
+    main_distill = _find(distill, "m3_distill_qwen0.5b") or (distill[0] if distill else None)
     distill_curve_rows = []
-    if distill:
-        for item in distill[0]["curve"]:
+    if main_distill:
+        for item in main_distill["curve"]:
             distill_curve_rows.append([item["step"], _fmt(item["ppl"], 4)])
+
+    ablation_rows = []
+    for row in distill:
+        if row["exp_id"].startswith("m3_ablate_") and not row["exp_id"].endswith("_smoke"):
+            ablation_rows.append([
+                row["exp_id"],
+                row.get("train_mode") or "-",
+                _fmt(row.get("alpha_kd"), 2),
+                _fmt(row.get("beta_ce"), 2),
+                _fmt(row.get("student_final_ppl"), 4),
+                f"{_fmt(row.get('gap_recovered_pct'), 2)}%",
+                row.get("trainable_params") or "-",
+            ])
 
     combo_rows = []
     for row in combos:
@@ -376,6 +395,13 @@ def _render_report(summary: dict[str, Any]) -> str:
         "## 曲线三: 蒸馏恢复",
         "",
         _markdown_table(["step", "PPL"], distill_curve_rows),
+        "",
+        "## M3 消融",
+        "",
+        _markdown_table(
+            ["实验", "模式", "α(KD)", "β(CE)", "final PPL", "gap recovered", "trainable params"],
+            ablation_rows,
+        ) if ablation_rows else "尚未发现 `m3_ablate_*.json`。在 A100 上运行 `python scripts/run_m3_ablation.py` 后重新生成报告即可补齐。",
         "",
         "## 组合汇总",
         "",

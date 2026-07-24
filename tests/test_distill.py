@@ -58,6 +58,41 @@ def test_prepare_and_export_distill_student():
     assert torch.isfinite(out2.logits).all()
 
 
+@pytest.mark.parametrize("mode", ["full", "scale", "lora"])
+def test_distill_train_modes_prepare_and_export(mode):
+    torch.manual_seed(3)
+    model = TinyDistillLM()
+    qcfg = QuantConfig(n_bits=4, group_size=8, symmetric=False, method="rtn", skip=("lm_head",))
+
+    model, n = prepare_distill_student(
+        model, qcfg,
+        train_mode=mode,
+        lora_rank=4,
+        lora_alpha=8.0,
+    )
+    assert n >= 1
+    assert isinstance(model.proj, DistillLinear)
+
+    trainable = {name: p for name, p in model.named_parameters() if p.requires_grad}
+    assert trainable
+    if mode == "full":
+        assert "proj.weight" in trainable
+    elif mode == "scale":
+        assert set(trainable) == {"proj.weight_scale"}
+    else:
+        assert set(trainable) == {"proj.lora_A", "proj.lora_B"}
+
+    x = torch.randint(0, 32, (2, 12))
+    out = model(x)
+    assert out.logits.shape == (2, 12, 32)
+    assert torch.isfinite(out.logits).all()
+
+    exported = export_distill_student(model, qcfg)
+    out2 = exported(x)
+    assert out2.logits.shape == (2, 12, 32)
+    assert torch.isfinite(out2.logits).all()
+
+
 def test_distillation_loop_reduces_eval_loss():
     torch.manual_seed(1)
     teacher = TinyDistillLM()
