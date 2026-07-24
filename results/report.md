@@ -1,7 +1,7 @@
 # LowBitSparse M4 报告
 
-生成时间: `2026-07-24T08:11:39.243588+00:00`
-数据来源: `results`，共读取 `28` 个 JSON。
+生成时间: `2026-07-24T08:30:07.714120+00:00`
+数据来源: `results`，共读取 `34` 个 JSON。
 
 ## 结论摘要
 
@@ -38,6 +38,7 @@
 | m2d_streaming_chunked_s64_w1024_c512 | streaming_chunked_prefill | 0.841 | 0.198x | 0.901x | 2105.7 |
 | m2e_streaming_compile_probe | - | 0.841 | 0.662x | 0.881x | -170.0 |
 | m2e_streaming_ringgraph_s64_w1024 | streaming_ring_graph | 0.841 | 1.000x | 5.331x | 137.9 |
+| m2e_streaming_ringgraph_s64_w1024_1.5b | streaming_ring_graph | 0.434 | 1.000x | 4.148x | 371.9 |
 
 M2-e 逐长度曲线:
 
@@ -61,7 +62,9 @@ M2-e 逐长度曲线:
 
 ## M3 消融
 
-尚未发现 `m3_ablate_*.json`。在 A100 上运行 `python scripts/run_m3_ablation.py` 后重新生成报告即可补齐。
+| 实验 | 模式 | α(KD) | β(CE) | final PPL | gap recovered | trainable params |
+| --- | --- | --- | --- | --- | --- | --- |
+| m3_ablate_full_a07_b03 | full | 0.70 | 0.30 | 14.0256 | 66.87% | 357854208 |
 
 ## 组合汇总
 

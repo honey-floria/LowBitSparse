@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-24T08:11:39.243588+00:00",
+  "generated_at": "2026-07-24T08:30:07.714120+00:00",
   "results_dir": "results",
-  "n_json_files": 28,
+  "n_json_files": 34,
   "baseline": {
     "exp_id": "m0_fp16_baseline",
     "path": "results/m0/m0_fp16_baseline.json",
@@ -138,6 +138,20 @@
       "size_mb": 315.311,
       "effective_bits": 5.353,
       "compression_ratio": 2.988
+    },
+    {
+      "exp_id": "m1_gptq_int4_embint8_1.5b",
+      "path": "results/m1_gptq_int4_embint8_1.5b.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": true,
+      "embedding_bits": 8,
+      "ppl": 10.3858,
+      "delta_ppl_vs_fp16": -3.8587,
+      "size_mb": 893.591,
+      "effective_bits": 4.855,
+      "compression_ratio": 3.295
     },
     {
       "exp_id": "m1_gptq_int4_g128",
@@ -655,9 +669,110 @@
         }
       ],
       "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;decode latency/memory 使用 ring-buffer KV cache + CUDA graph replay 路径;prefill 非 M2-e 优化对象,沿用 baseline 值。"
+    },
+    {
+      "exp_id": "m2e_streaming_ringgraph_s64_w1024_1.5b",
+      "path": "results/m2e_streaming_ringgraph_s64_w1024_1.5b.json",
+      "benchmark_kind": "streaming_ring_graph",
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "cache_pruning": false,
+        "chunked_prefill": false,
+        "prefill_chunk_size": 512,
+        "ring_graph": true,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.4345,
+      "max_delta_ppl": 0.7101,
+      "avg_prefill_speedup": 1.0,
+      "avg_decode_speedup": 4.148,
+      "avg_memory_delta_mb": 371.9455,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.1256,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.104,
+          "memory_delta_mb": 105.982
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.3674,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.173,
+          "memory_delta_mb": 172.342
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 0.5348,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.138,
+          "memory_delta_mb": 385.417
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 0.7101,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.177,
+          "memory_delta_mb": 824.041
+        }
+      ],
+      "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;decode latency/memory 使用 ring-buffer KV cache + CUDA graph replay 路径;prefill 非 M2-e 优化对象,沿用 baseline 值。"
     }
   ],
   "distill": [
+    {
+      "exp_id": "m3_ablate_full_a07_b03",
+      "path": "results/m3_ablate_full_a07_b03.json",
+      "train_mode": "full",
+      "alpha_kd": 0.7,
+      "beta_ce": 0.3,
+      "teacher_ppl": 13.08,
+      "student_init_ppl": 15.9338,
+      "student_final_ppl": 14.0256,
+      "gap_recovered": 0.6687,
+      "gap_recovered_pct": 66.87,
+      "trainable_params": 357854208,
+      "trainable_pct": 72.4353,
+      "size_mb": 441.082,
+      "effective_bits": 4.251,
+      "compression_ratio": 2.136,
+      "curve": [
+        {
+          "step": 0,
+          "ppl": 15.9338
+        },
+        {
+          "step": 20,
+          "ppl": 14.9512
+        },
+        {
+          "step": 40,
+          "ppl": 14.6023
+        },
+        {
+          "step": 60,
+          "ppl": 14.3175
+        },
+        {
+          "step": 80,
+          "ppl": 14.1702
+        },
+        {
+          "step": 100,
+          "ppl": 14.0256
+        }
+      ]
+    },
     {
       "exp_id": "m3_distill_qwen0.5b",
       "path": "results/m3_distill_qwen0.5b.json",
@@ -785,7 +900,7 @@
     }
   ],
   "missing": {
-    "qwen1.5b_results": true,
+    "qwen1.5b_results": false,
     "joint_quant_sparse_distill_results": true
   }
 }
