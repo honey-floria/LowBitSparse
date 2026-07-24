@@ -1,0 +1,69 @@
+{
+  "exp_id": "m1_gptq_int4_embint8_1.5b",
+  "env": {
+    "timestamp": "2026-07-24T08:12:19.337502+00:00",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB"
+  },
+  "config": {
+    "exp_id": "m1_gptq_int4_embint8_1.5b",
+    "seed": 42,
+    "out_dir": "results",
+    "model": {
+      "name": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "float16",
+      "device": "cuda"
+    },
+    "quant": {
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 128,
+      "symmetric": false,
+      "skip": [
+        "lm_head"
+      ],
+      "calib_n_samples": 128,
+      "calib_seqlen": 512,
+      "quant_embedding": true,
+      "embedding_bits": 8
+    },
+    "eval": {
+      "seqlen": 2048,
+      "stride": 2048,
+      "max_samples": null
+    },
+    "profile": {
+      "prefill_len": 512,
+      "decode_tokens": 128
+    }
+  },
+  "size_fp16": {
+    "params": 1543714304,
+    "params_millions": 1543.714,
+    "bytes": 3087428608,
+    "size_mb": 2944.401
+  },
+  "compression": {
+    "quant_weights": 1543569408,
+    "effective_bits": 4.855,
+    "size_mb": 893.591,
+    "ratio": 3.295
+  },
+  "ppl": {
+    "ppl": 10.3858,
+    "seqlen": 2048,
+    "stride": 2048,
+    "n_tokens": 299078
+  },
+  "latency": {
+    "prefill_len": 512,
+    "decode_tokens": 128,
+    "prefill_ms_median": 33.722,
+    "decode_tps_median": 30.73
+  },
+  "memory": {
+    "peak_mb": 6635.576,
+    "current_mb": 2953.527
+  }
+}
