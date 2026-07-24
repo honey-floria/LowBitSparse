@@ -1,18 +1,18 @@
 {
   "rows": [
     {
-      "exp_id": "m3_ablate_full_a07_b03",
-      "path": "results/m3_ablate_full_a07_b03.json",
-      "train_mode": "full",
+      "exp_id": "m3_ablate_lora_a07_b03",
+      "path": "results/m3_ablate_lora_a07_b03.json",
+      "train_mode": "lora",
       "alpha_kd": 0.7,
       "beta_ce": 0.3,
       "teacher_ppl": 13.08,
       "student_init_ppl": 15.9338,
-      "student_final_ppl": 14.0256,
-      "gap_recovered": 0.6687,
-      "gap_recovered_pct": 66.87,
-      "trainable_params": 357854208,
-      "trainable_pct": 72.4353,
+      "student_final_ppl": 15.3018,
+      "gap_recovered": 0.2215,
+      "gap_recovered_pct": 22.15,
+      "trainable_params": 4399104,
+      "trainable_pct": 0.8826,
       "size_mb": 441.082,
       "compression_ratio": 2.136
     },
