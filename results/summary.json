@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-24T08:32:30.055643+00:00",
+  "generated_at": "2026-07-24T08:52:09.252866+00:00",
   "results_dir": "results",
-  "n_json_files": 36,
+  "n_json_files": 34,
   "baseline": {
     "exp_id": "m0_fp16_baseline",
     "path": "results/m0/m0_fp16_baseline.json",
@@ -781,9 +781,9 @@
       "beta_ce": 0.3,
       "teacher_ppl": 13.08,
       "student_init_ppl": 15.9338,
-      "student_final_ppl": 15.3018,
-      "gap_recovered": 0.2215,
-      "gap_recovered_pct": 22.15,
+      "student_final_ppl": 15.3004,
+      "gap_recovered": 0.2219,
+      "gap_recovered_pct": 22.19,
       "trainable_params": 4399104,
       "trainable_pct": 0.8826,
       "size_mb": 441.082,
@@ -796,23 +796,23 @@
         },
         {
           "step": 20,
-          "ppl": 15.8517
+          "ppl": 15.8514
         },
         {
           "step": 40,
-          "ppl": 15.7643
+          "ppl": 15.764
         },
         {
           "step": 60,
-          "ppl": 15.6434
+          "ppl": 15.6418
         },
         {
           "step": 80,
-          "ppl": 15.4901
+          "ppl": 15.4893
         },
         {
           "step": 100,
-          "ppl": 15.3018
+          "ppl": 15.3004
         }
       ]
     },
@@ -934,6 +934,90 @@
       ]
     }
   ],
+  "qwen1.5b": {
+    "baseline": {
+      "exp_id": "m0_fp16_baseline_1.5b",
+      "path": "results/m0_fp16_baseline_1.5b.json",
+      "ppl": 9.6534,
+      "size_mb": 2944.401,
+      "prefill_ms": 35.346,
+      "decode_tps": 29.5,
+      "peak_mb": 6635.951
+    },
+    "quant": {
+      "exp_id": "m1_gptq_int4_embint8_1.5b",
+      "path": "results/m1_gptq_int4_embint8_1.5b.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": true,
+      "embedding_bits": 8,
+      "ppl": 10.3858,
+      "delta_ppl_vs_fp16": 0.7324,
+      "size_mb": 893.591,
+      "effective_bits": 4.855,
+      "compression_ratio": 3.295
+    },
+    "sparse": {
+      "exp_id": "m2e_streaming_ringgraph_s64_w1024_1.5b",
+      "path": "results/m2e_streaming_ringgraph_s64_w1024_1.5b.json",
+      "benchmark_kind": "streaming_ring_graph",
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "cache_pruning": false,
+        "chunked_prefill": false,
+        "prefill_chunk_size": 512,
+        "ring_graph": true,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.4345,
+      "max_delta_ppl": 0.7101,
+      "avg_prefill_speedup": 1.0,
+      "avg_decode_speedup": 4.148,
+      "avg_memory_delta_mb": 371.9455,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.1256,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.104,
+          "memory_delta_mb": 105.982
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.3674,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.173,
+          "memory_delta_mb": 172.342
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 0.5348,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.138,
+          "memory_delta_mb": 385.417
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 0.7101,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 4.177,
+          "memory_delta_mb": 824.041
+        }
+      ],
+      "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;decode latency/memory 使用 ring-buffer KV cache + CUDA graph replay 路径;prefill 非 M2-e 优化对象,沿用 baseline 值。"
+    },
+    "complete": true
+  },
   "combinations": [
     {
       "name": "GPTQ INT4 + emb INT8 + ring-graph sparse",

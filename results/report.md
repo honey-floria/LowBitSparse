@@ -1,7 +1,7 @@
 # LowBitSparse M4 报告
 
-生成时间: `2026-07-24T08:32:30.055643+00:00`
-数据来源: `results`，共读取 `36` 个 JSON。
+生成时间: `2026-07-24T08:52:09.252866+00:00`
+数据来源: `results`，共读取 `34` 个 JSON。
 
 ## 结论摘要
 
@@ -9,7 +9,7 @@
 - 精度恢复: M3 蒸馏把 RTN INT4 student 从 15.9786 拉到 14.2716，恢复 teacher-student 缺口 63.0%，压缩比保持 2.136x。
 - 加速: M2-e ring-buffer + CUDA graph 在 2k/4k/8k/16k 上平均 decode 5.331x，长序列 decode 显存节省随长度增加。
 - 组合: 当前组合项为独立实测结果的派生汇总，不声称已经完成量化+稀疏+蒸馏的同一模型端到端联合评测。
-- 1.5B: 本地和结果目录没有 1.5B 实测 JSON；报告不把 1.5B 外推当作结论。
+- 1.5B 关键复现已完成:FP16 baseline、推荐量化点和 M2-e ring-graph 均有 A100 JSON。
 
 ## 基线
 
@@ -65,8 +65,9 @@ M2-e 逐长度曲线:
 | 实验 | 模式 | α(KD) | β(CE) | final PPL | gap recovered | trainable params |
 | --- | --- | --- | --- | --- | --- | --- |
 | m3_ablate_full_a07_b03 | full | 0.70 | 0.30 | 14.0256 | 66.87% | 357854208 |
-| m3_ablate_lora_a07_b03 | lora | 0.70 | 0.30 | 15.3018 | 22.15% | 4399104 |
+| m3_ablate_lora_a07_b03 | lora | 0.70 | 0.30 | 15.3004 | 22.19% | 4399104 |
 | m3_ablate_scale_a07_b03 | scale | 0.70 | 0.30 | 15.2676 | 23.34% | 304128 |
+
 
 ## 组合汇总
 
@@ -78,17 +79,12 @@ M2-e 逐长度曲线:
 
 ## 1.5B 复现状态
 
-未发现 `qwen1.5b` 相关结果 JSON。当前 M4 报告只对 0.5B 实测结果负责；1.5B 复现需要在 A100/Colab 上补跑后重新生成本报告。
-
-建议补跑命令:
-
-```bash
-python main.py eval --config configs/qwen1.5b_base.yaml
-python main.py quant --config configs/qwen1.5b_gptq_int4_embint8.yaml
-python main.py sparse --config configs/qwen1.5b_sparse_streaming_ringgraph.yaml
-python scripts/build_m4_report.py
-```
+| 项 | PPL/ΔPPL | 体积/压缩比 | decode | 显存 |
+| --- | --- | --- | --- | --- |
+| FP16 baseline | 9.6534 | 2944.4 MB / 1.000x | 29.50 tok/s | 6636.0 MB |
+| GPTQ INT4 + emb INT8 | 10.3858 / Δ0.7324 | 893.6 MB / 3.295x | - | - |
+| M2-e ring-graph | avg Δ0.434 | 不改权重 | 4.148x | avg saved 371.9 MB |
 
 ## 最终判断
 
-0.5B 主线已经闭合:推荐路径是 GPTQ INT4 + embedding INT8 作为压缩默认点；需要更接近 FP16 精度时，用 M3 distilled RTN INT4；需要长序列 decode 加速时，用 M2-e ring-buffer + CUDA graph。M2-d 只作为显存优先的超长 prefill 兜底路径。
+0.5B 主线已经闭合:推荐路径是 GPTQ INT4 + embedding INT8 作为压缩默认点；需要更接近 FP16 精度时，用 M3 distilled RTN INT4；需要长序列 decode 加速时，用 M2-e ring-buffer + CUDA graph。1.5B 关键复现确认推荐量化点仍守住 ΔPPL < 1.0,M2-e decode 仍有 4.148x。M2-d 只作为显存优先的超长 prefill 兜底路径。
