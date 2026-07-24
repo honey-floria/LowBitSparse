@@ -173,14 +173,6 @@ def cmd_distill(args):
     if student_ppl is not None:
         log.info("M3 完成: student_final PPL = %s", student_ppl)
 
-
-def _todo(name):
-    """为已注册但尚未实现的里程碑命令构造占位处理函数。"""
-    def _fn(args):
-        raise SystemExit(f"[{name}] 尚未实现,将在对应里程碑完成。")
-    return _fn
-
-
 def build_parser():
     """构建顶层解析器,并把子命令绑定到对应处理函数。"""
     p = argparse.ArgumentParser(description="LowBitSparse 压缩工具箱")
@@ -198,7 +190,7 @@ def build_parser():
     ps.add_argument("--config", type=str, default="configs/qwen0.5b_sparse_sliding.yaml")
     ps.set_defaults(func=cmd_sparse)
 
-    sp = sub.add_parser("distill", help="M3: 量化感知蒸馏 (后续里程碑)")
+    sp = sub.add_parser("distill", help="M3: 量化感知蒸馏")
     sp.add_argument("--config", type=str, default="configs/qwen0.5b_distill.yaml")
     sp.set_defaults(func=cmd_distill)
     return p

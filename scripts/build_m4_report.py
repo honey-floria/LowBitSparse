@@ -348,7 +348,7 @@ def _render_report(summary: dict[str, Any]) -> str:
     ablation_modes = {row[1] for row in ablation_rows}
     ablation_note = ""
     if ablation_rows and "lora" not in ablation_modes:
-        ablation_note = "LoRA 本轮没有成功 JSON；若要补齐,运行 `python scripts/run_m3_ablation.py --modes lora --loss-grid 0.7:0.3` 后重新生成报告。"
+        ablation_note = "M3 消融缺少 LoRA JSON；若需补齐,运行 `python scripts/run_m3_ablation.py --modes lora --loss-grid 0.7:0.3` 后重新生成报告。"
 
     combo_rows = []
     for row in combos:

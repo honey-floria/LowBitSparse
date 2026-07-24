@@ -41,7 +41,7 @@
 | **M2-e ring-buffer + CUDA graph** ⭐ | Qwen2.5-0.5B-Instruct | ring cache 固定 sink+window=1088 + graph replay;2k/4k/8k/16k | avg ΔPPL +0.841(additive mask 参考,同 M2-c) | 942.3 MB(不改权重) | **decode ~5.3x(36→193 tok/s)**,与序列长度无关 | decode 峰值恒定 1088,省 18→327 MB(随长度增长) |
 | **M3 Distill RTN INT4** | Qwen2.5-0.5B-Instruct | teacher FP16;student=RTN INT4 g128 non-sym,train 100 steps,KL+CE | teacher 13.2698 → init 15.9786 → final **14.2716** | 441.1 MB(等效 4.251bit,压缩 2.136x) | 蒸馏训练不作统一 latency 口径;评测阶段同 RTN INT4 | 评测阶段同 RTN INT4;训练仅改变权重数值 |
 
-> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2d_streaming_chunked_s64_w1024_c512.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`、`results/m3_distill_qwen0.5b.json`。
+> 环境:A100-SXM4-40GB,torch 2.11.0+cu128,CUDA 12.8。数据源 `results/m0_fp16_baseline.json`、`results/m1_rtn_int8_g128.json`、`results/m1_gptq_int4_embint{8,4}.json`、`results/m2_summary.md`、`results/m2_sparse_*.json`、`results/m2c_streaming_kvprune_s64_w1024.json`、`results/m2d_streaming_chunked_s64_w1024_c512.json`、`results/m2e_streaming_ringgraph_s64_w1024.json`、`results/m3_distill_qwen0.5b.json`、`results/m3_ablation_summary.json`。
 > **数据源说明**:GPTQ/AWQ/RTN-INT4 的 PPL/压缩比来自 `run_sweep.py` 扫描(见 `results/m1_summary.md`,格式只含 size/compression/ppl);上表 GPTQ/AWQ 行的**延迟/显存**取自更早一次 `cmd_quant` 单跑(带 latency/memory 字段,已被 sweep 同名覆盖,原值见 git `ae7d99f`)。PPL 两次一致(seed=42 复现),延迟/显存不受量化方法影响,合并展示无碍。
 > 压缩比基准(体积分母)= 942.3 MB。**注意**:延迟/显存与基线相同,因伪量化仍走 FP16 matmul,压缩比为"理论值"(真实 INT kernel 可省下的量)。
 > 压缩地板(已被 M1-g 打掉):embedding(约 136.2M 参数 / 260 MB,与 lm_head 权重共享)默认 skip 时是压缩天花板(占量化后总体积 42-59%);`quant_embedding` 量化它后 emb INT8 白拿 2.99x、emb INT4 达 3.76x。
@@ -536,16 +536,12 @@ python scripts/build_m4_report.py
 | --- | --- | --- | --- | --- | --- | --- |
 | full | 0.7/0.3 | 14.0256 | 66.87% | 357,854,208 | 72.4353% | 2.136x |
 | scale | 0.7/0.3 | 15.2676 | 23.34% | 304,128 | 0.0615% | 2.136x |
+| LoRA rank=8 | 0.7/0.3 | 15.3004 | 22.19% | 4,399,104 | 0.8826% | 2.136x |
 
 **消融结论**:
 1. `full` 比原 `m3_distill_qwen0.5b` 更好(14.0256 vs 14.2716),本质是同配置重跑的随机/环境波动下仍稳定恢复 60%+ gap。
 2. `scale` 只用 30.4 万可训练参数即可恢复 23.34% gap,说明每通道重标定确实有用,但容量远不足以接近 FP16。
-3. 本轮 LoRA JSON 未产出,失败记录来自旧代码中新增 LoRA/scale 参数仍在 CPU 的 device mismatch;当前代码已修复,需要在 A100 上补跑:
-
-```bash
-python scripts/run_m3_ablation.py --modes lora --loss-grid 0.7:0.3
-python scripts/build_m4_report.py
-```
+3. `LoRA rank=8` 训练 439.9 万参数,恢复 22.19% gap,与 scale 基本打平但参数量多约 14.5x;该配置下 LoRA 没有体现出优于逐通道 scale 的性价比。
 
 ## [2026-07-24] M4 — 汇总报告生成与组合结论收口
 **背景 / 目标**:M4 要把 M0/M1/M2/M3 的结果汇总成统一机器可读表和最终报告,并给出量化、稀疏、蒸馏三类曲线与组合结论。
@@ -570,7 +566,7 @@ python scripts/build_m4_report.py
 **边界 / 风险**:
 - 组合实验当前是派生汇总,不是同一模型上端到端叠加量化+稀疏+蒸馏后的联合 forward 评测。
 - M2-e 的质量仍是 StreamingLLM additive mask teacher-forced PPL 参考;ring-buffer + CUDA graph 路径的 latency/memory 是真实 benchmark proof,生产级 generate 仍需 RoPE 相位忠实修正。
-- LoRA 消融本轮没有成功 JSON,需用 device mismatch 修复后的代码补跑。
+- M3 LoRA 消融已补跑完成;当前风险不在链路失败,而在 rank=8/α=0.7/β=0.3 单点不足以证明 LoRA 最优超参。
 
 **结论**:M4 的 0.5B 报告链路已收口。推荐默认点是 GPTQ INT4 + embedding INT8;若优先精度,选 M3 distilled RTN INT4;若优先长序列 decode,叠加 M2-e ring-buffer + CUDA graph。
 

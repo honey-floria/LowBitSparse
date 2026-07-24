@@ -182,9 +182,9 @@ LowBitSparse/
 - [x] 训练循环:AMP、梯度检查点、checkpoint / result save
 - [x] 消融:全参 vs 仅 scale vs LoRA;α/β 权重
       已实现 `train_mode=full|scale|lora`、LoRA rank/alpha 配置、可训练参数统计、
-      一键脚本 `scripts/run_m3_ablation.py`;A100 已回填 full/scale 的 0.7/0.3 对比:
-      full 66.87% gap recovered,scale 23.34%。LoRA 本轮在旧代码 device mismatch 处失败,
-      修复后需补跑 `--modes lora --loss-grid 0.7:0.3`。
+      一键脚本 `scripts/run_m3_ablation.py`;A100 已回填 full/scale/LoRA 的 0.7/0.3 对比:
+      full 66.87% gap recovered,scale 23.34%,LoRA 22.19%。结论:full 明显最好,
+      scale/LoRA 均能小成本恢复约 22-23% 缺口,但容量不足以接近 FP16。
 - [x] **验收**:蒸馏 step vs PPL 恢复曲线
       A100 `results/m3_distill_qwen0.5b.json`: teacher 13.2698 → student_init 15.9786 → student_final 14.2716, 恢复 RTN-INT4 缺口 63.0%(1.707 / 2.7088),最终相对 FP16 仅 +0.0271 PPL;压缩保持 441.1 MB / 4.251 bit / 2.136x。
 
@@ -236,6 +236,19 @@ LowBitSparse/
 
 ---
 
-## 6. 执行顺序建议
+## 6. 项目收尾状态
+主线 M0-M4 已完成并回填 A100 / 1.5B 关键结果。当前仓库定位是**可复现实验项目**:
+代码、配置、Colab 执行手册、结果 JSON、M4 报告和复盘文档均已闭合。
+
+剩余项不阻塞项目验收,属于后续工程化或扩展研究:
+- [ ] M2-e 生产化:补 RoPE 相位忠实修正、token parity 验证,并接入真实 `generate()`。
+- [ ] 端到端联合评测:在同一模型 forward 中同时启用量化、稀疏和蒸馏权重,替代当前 M4 的 derived 汇总口径。
+- [ ] LoRA 超参扩展:扫描 rank=4/8/16/32、LoRA alpha 和更多 α/β 组合,确认 LoRA 是否存在优于 scale 的配置。
+- [ ] AWQ 忠实 auto_clip:按输出误差逐候选前向搜索,替代已默认关闭的权重空间代理裁剪。
+- [ ] 部署化 INT kernel:接入真实 INT4/INT8 kernel 或导出格式,把当前理论压缩比转成实际推理 footprint / latency。
+
+---
+
+## 7. 执行顺序建议
 M0 → M1(先 RTN 打通闭环,再 GPTQ/AWQ)→ M2 → M3 → M4。
 每个里程碑结束:更新本文件状态 + 在 `OPTIMIZATION.md` 写复盘。

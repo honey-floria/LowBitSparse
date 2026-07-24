@@ -1,6 +1,22 @@
 {
   "rows": [
     {
+      "exp_id": "m3_ablate_full_a07_b03",
+      "path": "results/m3_ablate_full_a07_b03.json",
+      "train_mode": "full",
+      "alpha_kd": 0.7,
+      "beta_ce": 0.3,
+      "teacher_ppl": 13.08,
+      "student_init_ppl": 15.9338,
+      "student_final_ppl": 14.0256,
+      "gap_recovered": 0.6687,
+      "gap_recovered_pct": 66.87,
+      "trainable_params": 357854208,
+      "trainable_pct": 72.4353,
+      "size_mb": 441.082,
+      "compression_ratio": 2.136
+    },
+    {
       "exp_id": "m3_ablate_lora_a07_b03",
       "path": "results/m3_ablate_lora_a07_b03.json",
       "train_mode": "lora",
@@ -13,6 +29,22 @@
       "gap_recovered_pct": 22.19,
       "trainable_params": 4399104,
       "trainable_pct": 0.8826,
+      "size_mb": 441.082,
+      "compression_ratio": 2.136
+    },
+    {
+      "exp_id": "m3_ablate_scale_a07_b03",
+      "path": "results/m3_ablate_scale_a07_b03.json",
+      "train_mode": "scale",
+      "alpha_kd": 0.7,
+      "beta_ce": 0.3,
+      "teacher_ppl": 13.08,
+      "student_init_ppl": 15.9338,
+      "student_final_ppl": 15.2676,
+      "gap_recovered": 0.2334,
+      "gap_recovered_pct": 23.34,
+      "trainable_params": 304128,
+      "trainable_pct": 0.0615,
       "size_mb": 441.082,
       "compression_ratio": 2.136
     }
