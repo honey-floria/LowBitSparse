@@ -96,12 +96,24 @@ class DistillLinear(nn.Module):
             self.bias = None
 
         if self.train_mode == "scale":
-            self.weight_scale = nn.Parameter(torch.ones(self.out_features, 1))
+            self.weight_scale = nn.Parameter(torch.ones(
+                self.out_features, 1,
+                device=linear.weight.device,
+                dtype=torch.float32,
+            ))
         elif self.train_mode == "lora":
             if self.lora_rank <= 0:
                 raise ValueError("lora_rank 必须 > 0")
-            self.lora_A = nn.Parameter(torch.empty(self.lora_rank, self.in_features))
-            self.lora_B = nn.Parameter(torch.zeros(self.out_features, self.lora_rank))
+            self.lora_A = nn.Parameter(torch.empty(
+                self.lora_rank, self.in_features,
+                device=linear.weight.device,
+                dtype=torch.float32,
+            ))
+            self.lora_B = nn.Parameter(torch.zeros(
+                self.out_features, self.lora_rank,
+                device=linear.weight.device,
+                dtype=torch.float32,
+            ))
             nn.init.kaiming_uniform_(self.lora_A, a=5 ** 0.5)
             self.lora_scaling = self.lora_alpha / self.lora_rank
         elif self.train_mode != "full":
@@ -187,7 +199,11 @@ class DistillEmbedding(nn.Module):
         else:
             self.register_buffer("weight", init.float().clone())
         if self.train_mode == "scale":
-            self.weight_scale = nn.Parameter(torch.ones(1, self.embedding_dim))
+            self.weight_scale = nn.Parameter(torch.ones(
+                1, self.embedding_dim,
+                device=emb.weight.device,
+                dtype=torch.float32,
+            ))
         elif self.train_mode not in ("full", "lora"):
             raise ValueError(f"未知 train_mode: {self.train_mode}")
 

@@ -75,6 +75,7 @@ def test_distill_train_modes_prepare_and_export(mode):
 
     trainable = {name: p for name, p in model.named_parameters() if p.requires_grad}
     assert trainable
+    assert all(p.device == model.proj.weight.device for p in trainable.values())
     if mode == "full":
         assert "proj.weight" in trainable
     elif mode == "scale":
