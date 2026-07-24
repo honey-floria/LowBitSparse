@@ -530,6 +530,23 @@ python scripts/build_m4_report.py
 
 **结论 & 下一步**:M3 消融代码链路已完成。正式数值需要在 Colab A100 上跑 `run_m3_ablation.py`;如果时间紧,先跑 `--modes scale lora --loss-grid 0.7:0.3` 与已有 full 结果对比。
 
+**A100 回填(2026-07-24)**:
+
+| 模式 | α/β | final PPL | gap recovered | trainable params | trainable % | 压缩比 |
+| --- | --- | --- | --- | --- | --- | --- |
+| full | 0.7/0.3 | 14.0256 | 66.87% | 357,854,208 | 72.4353% | 2.136x |
+| scale | 0.7/0.3 | 15.2676 | 23.34% | 304,128 | 0.0615% | 2.136x |
+
+**消融结论**:
+1. `full` 比原 `m3_distill_qwen0.5b` 更好(14.0256 vs 14.2716),本质是同配置重跑的随机/环境波动下仍稳定恢复 60%+ gap。
+2. `scale` 只用 30.4 万可训练参数即可恢复 23.34% gap,说明每通道重标定确实有用,但容量远不足以接近 FP16。
+3. 本轮 LoRA JSON 未产出,失败记录来自旧代码中新增 LoRA/scale 参数仍在 CPU 的 device mismatch;当前代码已修复,需要在 A100 上补跑:
+
+```bash
+python scripts/run_m3_ablation.py --modes lora --loss-grid 0.7:0.3
+python scripts/build_m4_report.py
+```
+
 ## [2026-07-24] M4 — 汇总报告生成与组合结论收口
 **背景 / 目标**:M4 要把 M0/M1/M2/M3 的结果汇总成统一机器可读表和最终报告,并给出量化、稀疏、蒸馏三类曲线与组合结论。
 
@@ -551,10 +568,20 @@ python scripts/build_m4_report.py
 | M3 distilled RTN INT4 + M2-e | 441.1 MB / 2.136x | 14.2716 | +0.841 | 5.331x |
 
 **边界 / 风险**:
-- 当前工作站是 CPU 环境(`torch 2.13.0+cpu`,CUDA 不可用),不能真实补跑 1.5B 或联合量化+稀疏+蒸馏模型。
-- 结果目录没有 `qwen1.5b` 相关 JSON,因此 TODO 中 1.5B 复现标为 `[!]` 而不是 `[x]`。
+- 组合实验当前是派生汇总,不是同一模型上端到端叠加量化+稀疏+蒸馏后的联合 forward 评测。
 - M2-e 的质量仍是 StreamingLLM additive mask teacher-forced PPL 参考;ring-buffer + CUDA graph 路径的 latency/memory 是真实 benchmark proof,生产级 generate 仍需 RoPE 相位忠实修正。
+- LoRA 消融本轮没有成功 JSON,需用 device mismatch 修复后的代码补跑。
 
 **结论**:M4 的 0.5B 报告链路已收口。推荐默认点是 GPTQ INT4 + embedding INT8;若优先精度,选 M3 distilled RTN INT4;若优先长序列 decode,叠加 M2-e ring-buffer + CUDA graph。
+
+**A100 1.5B 回填(2026-07-24)**:
+
+| 项 | 结果 |
+| --- | --- |
+| FP16 baseline | PPL 9.6534,体积 2944.4 MB,decode 29.50 tok/s,peak 6636.0 MB |
+| GPTQ INT4 + emb INT8 | PPL 10.3858(Δ+0.7324),体积 893.6 MB,压缩 3.295x |
+| M2-e ring-buffer + CUDA graph | avg ΔPPL +0.434,avg decode 4.148x,avg memory saved 371.9 MB |
+
+**1.5B 结论**:关键趋势能迁移到更大模型:推荐量化点仍把 PPL 退化压在 1.0 内,压缩比升至 3.295x;M2-e decode 加速从 0.5B 的 5.331x 降到 4.148x,但仍大幅超过 1.2x 目标。
 
 <!-- 后续条目在此追加,遵循上方模板 -->

@@ -32,8 +32,8 @@ def _load_results(results_dir: Path) -> dict[str, dict[str, Any]]:
     """递归读取 results 下的全部 JSON，按 exp_id 建索引。"""
     items: dict[str, dict[str, Any]] = {}
     for path in sorted(results_dir.rglob("*.json")):
-        # summary.json 是本脚本的输出，不应在下一次运行时被当作原始实验输入。
-        if path.name == "summary.json":
+        # 这些文件是汇总/失败日志输出，不应在下一次运行时被当作原始实验输入。
+        if path.name == "summary.json" or path.name.endswith("_summary.json") or path.name.endswith("_failures.json"):
             continue
         data = _load_json(path)
         exp_id = data.get("exp_id") or path.stem
@@ -192,6 +192,31 @@ def _find(rows: list[dict[str, Any]], exp_id: str) -> dict[str, Any] | None:
     return next((r for r in rows if r.get("exp_id") == exp_id), None)
 
 
+def _summarize_1p5b(items: dict[str, dict[str, Any]], quant_rows, sparse_rows) -> dict[str, Any]:
+    """提取 Qwen2.5-1.5B 关键复现结果。"""
+    baseline = items.get("m0_fp16_baseline_1.5b")
+    quant = _find(quant_rows, "m1_gptq_int4_embint8_1.5b")
+    sparse = _find(sparse_rows, "m2e_streaming_ringgraph_s64_w1024_1.5b")
+    baseline_ppl = _get(baseline or {}, "ppl", "ppl")
+    if quant and baseline_ppl is not None and quant.get("ppl") is not None:
+        quant = dict(quant)
+        quant["delta_ppl_vs_fp16"] = round(quant["ppl"] - baseline_ppl, 4)
+    return {
+        "baseline": {
+            "exp_id": "m0_fp16_baseline_1.5b",
+            "path": baseline.get("_path") if baseline else None,
+            "ppl": _get(baseline or {}, "ppl", "ppl"),
+            "size_mb": _get(baseline or {}, "size", "size_mb"),
+            "prefill_ms": _get(baseline or {}, "latency", "prefill_ms_median"),
+            "decode_tps": _get(baseline or {}, "latency", "decode_tps_median"),
+            "peak_mb": _get(baseline or {}, "memory", "peak_mb"),
+        } if baseline else None,
+        "quant": quant,
+        "sparse": sparse,
+        "complete": bool(baseline and quant and sparse),
+    }
+
+
 def _build_combinations(quant_rows, sparse_rows, distill_rows) -> list[dict[str, Any]]:
     """构造 M4 组合项。
 
@@ -266,6 +291,7 @@ def _render_report(summary: dict[str, Any]) -> str:
     sparse = summary["sparse"]
     distill = summary["distill"]
     combos = summary["combinations"]
+    qwen_1p5b = summary.get("qwen1.5b", {})
     ring = _find(sparse, "m2e_streaming_ringgraph_s64_w1024")
 
     selected_quant_ids = [
@@ -319,6 +345,10 @@ def _render_report(summary: dict[str, Any]) -> str:
                 f"{_fmt(row.get('gap_recovered_pct'), 2)}%",
                 row.get("trainable_params") or "-",
             ])
+    ablation_modes = {row[1] for row in ablation_rows}
+    ablation_note = ""
+    if ablation_rows and "lora" not in ablation_modes:
+        ablation_note = "LoRA 本轮没有成功 JSON；若要补齐,运行 `python scripts/run_m3_ablation.py --modes lora --loss-grid 0.7:0.3` 后重新生成报告。"
 
     combo_rows = []
     for row in combos:
@@ -332,6 +362,56 @@ def _render_report(summary: dict[str, Any]) -> str:
             f"{_fmt(row.get('avg_decode_speedup'), 3)}x",
         ])
 
+    if qwen_1p5b.get("complete"):
+        b15 = qwen_1p5b["baseline"]
+        q15 = qwen_1p5b["quant"]
+        s15 = qwen_1p5b["sparse"]
+        qwen_1p5b_text = _markdown_table(
+            ["项", "PPL/ΔPPL", "体积/压缩比", "decode", "显存"],
+            [
+                [
+                    "FP16 baseline",
+                    _fmt(b15.get("ppl"), 4),
+                    f"{_fmt(b15.get('size_mb'), 1)} MB / 1.000x",
+                    f"{_fmt(b15.get('decode_tps'), 2)} tok/s",
+                    f"{_fmt(b15.get('peak_mb'), 1)} MB",
+                ],
+                [
+                    "GPTQ INT4 + emb INT8",
+                    f"{_fmt(q15.get('ppl'), 4)} / Δ{_fmt(q15.get('delta_ppl_vs_fp16'), 4)}",
+                    f"{_fmt(q15.get('size_mb'), 1)} MB / {_fmt(q15.get('compression_ratio'), 3)}x",
+                    "-",
+                    "-",
+                ],
+                [
+                    "M2-e ring-graph",
+                    f"avg Δ{_fmt(s15.get('avg_delta_ppl'), 3)}",
+                    "不改权重",
+                    f"{_fmt(s15.get('avg_decode_speedup'), 3)}x",
+                    f"avg saved {_fmt(s15.get('avg_memory_delta_mb'), 1)} MB",
+                ],
+            ],
+        )
+        qwen_1p5b_note = (
+            "1.5B 关键复现已完成:FP16 baseline、推荐量化点和 M2-e ring-graph 均有 A100 JSON。"
+        )
+    else:
+        qwen_1p5b_text = "\n".join([
+            "未发现完整 `qwen1.5b` 关键复现 JSON。当前报告只对已有实测结果负责；缺失项需要在 A100/Colab 上补跑后重新生成本报告。",
+            "",
+            "建议补跑命令:",
+            "",
+            "```bash",
+            "python main.py eval --config configs/qwen1.5b_base.yaml",
+            "python main.py quant --config configs/qwen1.5b_gptq_int4_embint8.yaml",
+            "python main.py sparse --config configs/qwen1.5b_sparse_streaming_ringgraph.yaml",
+            "python scripts/build_m4_report.py",
+            "```",
+        ])
+        qwen_1p5b_note = (
+            "1.5B: 关键复现未完整,报告不做外推。"
+        )
+
     lines = [
         "# LowBitSparse M4 报告",
         "",
@@ -344,7 +424,7 @@ def _render_report(summary: dict[str, Any]) -> str:
         "- 精度恢复: M3 蒸馏把 RTN INT4 student 从 15.9786 拉到 14.2716，恢复 teacher-student 缺口 63.0%，压缩比保持 2.136x。",
         "- 加速: M2-e ring-buffer + CUDA graph 在 2k/4k/8k/16k 上平均 decode 5.331x，长序列 decode 显存节省随长度增加。",
         "- 组合: 当前组合项为独立实测结果的派生汇总，不声称已经完成量化+稀疏+蒸馏的同一模型端到端联合评测。",
-        "- 1.5B: 本地和结果目录没有 1.5B 实测 JSON；报告不把 1.5B 外推当作结论。",
+        f"- {qwen_1p5b_note}",
         "",
         "## 基线",
         "",
@@ -402,6 +482,7 @@ def _render_report(summary: dict[str, Any]) -> str:
             ["实验", "模式", "α(KD)", "β(CE)", "final PPL", "gap recovered", "trainable params"],
             ablation_rows,
         ) if ablation_rows else "尚未发现 `m3_ablate_*.json`。在 A100 上运行 `python scripts/run_m3_ablation.py` 后重新生成报告即可补齐。",
+        ablation_note,
         "",
         "## 组合汇总",
         "",
@@ -412,20 +493,11 @@ def _render_report(summary: dict[str, Any]) -> str:
         "",
         "## 1.5B 复现状态",
         "",
-        "未发现 `qwen1.5b` 相关结果 JSON。当前 M4 报告只对 0.5B 实测结果负责；1.5B 复现需要在 A100/Colab 上补跑后重新生成本报告。",
-        "",
-        "建议补跑命令:",
-        "",
-        "```bash",
-        "python main.py eval --config configs/qwen1.5b_base.yaml",
-        "python main.py quant --config configs/qwen1.5b_gptq_int4_embint8.yaml",
-        "python main.py sparse --config configs/qwen1.5b_sparse_streaming_ringgraph.yaml",
-        "python scripts/build_m4_report.py",
-        "```",
+        qwen_1p5b_text,
         "",
         "## 最终判断",
         "",
-        "0.5B 主线已经闭合:推荐路径是 GPTQ INT4 + embedding INT8 作为压缩默认点；需要更接近 FP16 精度时，用 M3 distilled RTN INT4；需要长序列 decode 加速时，用 M2-e ring-buffer + CUDA graph。M2-d 只作为显存优先的超长 prefill 兜底路径。",
+        "0.5B 主线已经闭合:推荐路径是 GPTQ INT4 + embedding INT8 作为压缩默认点；需要更接近 FP16 精度时，用 M3 distilled RTN INT4；需要长序列 decode 加速时，用 M2-e ring-buffer + CUDA graph。1.5B 关键复现确认推荐量化点仍守住 ΔPPL < 1.0,M2-e decode 仍有 4.148x。M2-d 只作为显存优先的超长 prefill 兜底路径。",
         "",
     ]
     return "\n".join(lines)
@@ -448,6 +520,7 @@ def build_summary(results_dir: Path) -> dict[str, Any]:
     quant = _summarize_quant(items, baseline["ppl"])
     sparse = _summarize_sparse(items)
     distill = _summarize_distill(items)
+    qwen_1p5b = _summarize_1p5b(items, quant, sparse)
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "results_dir": str(results_dir.as_posix()),
@@ -456,9 +529,10 @@ def build_summary(results_dir: Path) -> dict[str, Any]:
         "quant": quant,
         "sparse": sparse,
         "distill": distill,
+        "qwen1.5b": qwen_1p5b,
         "combinations": _build_combinations(quant, sparse, distill),
         "missing": {
-            "qwen1.5b_results": not any("1.5b" in exp_id.lower() for exp_id in items),
+            "qwen1.5b_results": not qwen_1p5b["complete"],
             "joint_quant_sparse_distill_results": True,
         },
     }

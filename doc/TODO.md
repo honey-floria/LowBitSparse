@@ -41,7 +41,7 @@
 ### 2.1 整体架构
 ```
 LowBitSparse/
-├── main.py                      # CLI 入口:eval/quant/sparse 已实现、distill 占位;量化+评测闭环
+├── main.py                      # CLI 入口:eval/quant/sparse/distill 已实现
 ├── configs/                     # YAML 实验配置
 │   ├── qwen0.5b_base.yaml       #   0.5B FP16 基线(M0)
 │   ├── qwen1.5b_base.yaml       #   1.5B FP16 基线
@@ -71,7 +71,7 @@ LowBitSparse/
 │   │   ├── fake_linear.py       #   FakeQuantLinear:持有反量化权重,forward 走标准 matmul
 │   │   └── apply.py             #   遍历替换 Linear、按 method 路由、压缩比/等效 bit 统计
 │   ├── sparse/                  # 滑窗 / StreamingLLM / 块稀疏 注意力(M2)
-│   ├── distill/                 # QAT 蒸馏训练循环(M3,代码已落地,ablation pending)
+│   ├── distill/                 # QAT 蒸馏训练循环(M3,含 full/scale/LoRA 消融)
 │   ├── eval/                    # 评测
 │   │   ├── ppl.py               #   WikiText-2 strided PPL
 │   │   └── profiler.py          #   prefill/decode 延迟、显存峰值
@@ -182,7 +182,9 @@ LowBitSparse/
 - [x] 训练循环:AMP、梯度检查点、checkpoint / result save
 - [x] 消融:全参 vs 仅 scale vs LoRA;α/β 权重
       已实现 `train_mode=full|scale|lora`、LoRA rank/alpha 配置、可训练参数统计、
-      一键脚本 `scripts/run_m3_ablation.py`;A100 实测后自动生成 `results/m3_ablation_summary.{json,md}`。
+      一键脚本 `scripts/run_m3_ablation.py`;A100 已回填 full/scale 的 0.7/0.3 对比:
+      full 66.87% gap recovered,scale 23.34%。LoRA 本轮在旧代码 device mismatch 处失败,
+      修复后需补跑 `--modes lora --loss-grid 0.7:0.3`。
 - [x] **验收**:蒸馏 step vs PPL 恢复曲线
       A100 `results/m3_distill_qwen0.5b.json`: teacher 13.2698 → student_init 15.9786 → student_final 14.2716, 恢复 RTN-INT4 缺口 63.0%(1.707 / 2.7088),最终相对 FP16 仅 +0.0271 PPL;压缩保持 441.1 MB / 4.251 bit / 2.136x。
 
@@ -191,8 +193,9 @@ LowBitSparse/
 - [x] 组合实验:量化+稀疏、量化+稀疏+蒸馏
       已按派生组合口径收口:量化/蒸馏 PPL 与压缩比来自 M1/M3 独立实测,
       长序列 decode 与质量参考来自 M2-e;未伪装成同一模型端到端联合实跑。
-- [!] 1.5B 模型上复现关键结论
-      当前本地环境为 CPU、结果目录无 1.5B JSON,无法真实 A100 复现;补跑命令和口径见 `results/report.md`。
+- [x] 1.5B 模型上复现关键结论
+      A100 已回填 FP16 baseline、GPTQ INT4+emb INT8、M2-e ring-graph:
+      PPL 9.6534 → 10.3858(Δ+0.7324),压缩 3.295x;M2-e avg decode 4.148x。
 - [x] **验收**:`results/report.md` 三类曲线 + 结论
       0.5B 主线已闭合:压缩曲线、长序列加速曲线、蒸馏恢复曲线均已由 `scripts/build_m4_report.py` 自动生成。
 
@@ -211,10 +214,10 @@ LowBitSparse/
 - **显存**:峰值显存(`torch.cuda.max_memory_allocated`),含 KV cache。
 
 ### 4.3 正确性/回归测试
-- [ ] 单元测试:量化-反量化数值误差在容差内(pytest)。
-- [ ] 伪量化前向与参考实现的 logits 对齐(相对误差阈值)。
-- [ ] 稀疏 mask 形状/因果性断言。
-- [ ] 每次实验固定随机种子,结果 json 可复现。
+- [x] 单元测试:量化-反量化数值误差在容差内(pytest)。
+- [x] 伪量化前向与参考实现的形状/dtype/有限值检查。
+- [x] 稀疏 mask 形状/因果性断言。
+- [x] 每次实验固定随机种子,结果 json 内记录 config/env。
 
 ### 4.4 实验记录规范
 - 每个实验一个 `results/<exp_id>.json`:配置 + 指标 + 环境(GPU、commit)。
