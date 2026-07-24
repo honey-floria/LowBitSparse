@@ -48,6 +48,7 @@ LowBitSparse/
 │   ├── qwen0.5b_int8.yaml       #   RTN INT8(量化健全性检查)
 │   ├── qwen0.5b_int4.yaml       #   RTN INT4
 │   ├── qwen0.5b_gptq_int4.yaml  #   GPTQ INT4(含校准参数)
+│   ├── qwen0.5b_gptq_int4_embint8.yaml # GPTQ INT4 + embedding INT8(M1/M4 推荐点)
 │   ├── qwen0.5b_awq_int4.yaml   #   AWQ INT4(含校准参数)
 │   ├── qwen0.5b_sparse_sliding.yaml   #   Sliding Window M2
 │   ├── qwen0.5b_sparse_streaming.yaml #   StreamingLLM M2
@@ -55,7 +56,9 @@ LowBitSparse/
 │   ├── qwen0.5b_sparse_streaming_kvprune.yaml   #   M2-c KV cache 裁剪
 │   ├── qwen0.5b_sparse_streaming_chunked.yaml   #   M2-d chunked prefill
 │   ├── qwen0.5b_sparse_streaming_compile.yaml   #   M2-e 前置 compile/graph 探针
-│   └── qwen0.5b_sparse_streaming_ringgraph.yaml #   M2-e ring-buffer + CUDA graph
+│   ├── qwen0.5b_sparse_streaming_ringgraph.yaml #   M2-e ring-buffer + CUDA graph
+│   ├── qwen1.5b_gptq_int4_embint8.yaml          #   M4 1.5B 量化复现配置
+│   └── qwen1.5b_sparse_streaming_ringgraph.yaml #   M4 1.5B 稀疏复现配置
 ├── lowbitsparse/
 │   ├── models/loader.py         # 模型/分词器加载(dtype/设备管理)、体积统计
 │   ├── quant/                   # 权重量化(M1 核心)
@@ -77,6 +80,7 @@ LowBitSparse/
 │   ├── cpu_smoke.py             #   CPU 秒级冒烟:步骤1-7 演示量化数学+校准流水线(无下载)
 │   ├── run_sweep.py             #   method×bit×group_size 全组合扫描,落盘 json
 │   ├── summarize.py             #   汇总 results/*.json 为验收表格(含 ΔPPL)
+│   ├── build_m4_report.py       #   汇总 M0-M3 JSON,生成 M4 summary/report
 │   └── run.ipynb                #   Colab:挂 Drive、装依赖、跑 M0/M1/M2/M2-c/M2-d/M2-e
 ├── tests/                       # pytest:test_rtn / test_gptq / test_awq / test_group_size
 ├── results/                     # 指标 json / 曲线图 / 报告
@@ -180,10 +184,14 @@ LowBitSparse/
       A100 `results/m3_distill_qwen0.5b.json`: teacher 13.2698 → student_init 15.9786 → student_final 14.2716, 恢复 RTN-INT4 缺口 63.0%(1.707 / 2.7088),最终相对 FP16 仅 +0.0271 PPL;压缩保持 441.1 MB / 4.251 bit / 2.136x。
 
 ### M4 — 消融 & 报告
-- [ ] 汇总所有实验到统一表格(results/summary.json)
-- [ ] 组合实验:量化+稀疏、量化+稀疏+蒸馏
-- [ ] 1.5B 模型上复现关键结论
-- [ ] **验收**:`results/report.md` 三类曲线 + 结论
+- [x] 汇总所有实验到统一表格(`results/summary.json`)
+- [x] 组合实验:量化+稀疏、量化+稀疏+蒸馏
+      已按派生组合口径收口:量化/蒸馏 PPL 与压缩比来自 M1/M3 独立实测,
+      长序列 decode 与质量参考来自 M2-e;未伪装成同一模型端到端联合实跑。
+- [!] 1.5B 模型上复现关键结论
+      当前本地环境为 CPU、结果目录无 1.5B JSON,无法真实 A100 复现;补跑命令和口径见 `results/report.md`。
+- [x] **验收**:`results/report.md` 三类曲线 + 结论
+      0.5B 主线已闭合:压缩曲线、长序列加速曲线、蒸馏恢复曲线均已由 `scripts/build_m4_report.py` 自动生成。
 
 ---
 

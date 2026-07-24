@@ -1,0 +1,781 @@
+{
+  "generated_at": "2026-07-24T07:52:20.818786+00:00",
+  "results_dir": "results",
+  "n_json_files": 28,
+  "baseline": {
+    "exp_id": "m0_fp16_baseline",
+    "path": "results/m0/m0_fp16_baseline.json",
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "ppl": 14.2445,
+    "size_mb": 942.293,
+    "prefill_ms": 28.892,
+    "decode_tps": 38.2,
+    "peak_mb": 4574.341
+  },
+  "quant": [
+    {
+      "exp_id": "m1_awq_int3_g128",
+      "path": "results/m1/m1_awq_int3_g128.json",
+      "method": "awq",
+      "n_bits": 3,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 48.7307,
+      "delta_ppl_vs_fp16": 34.4862,
+      "size_mb": 398.426,
+      "effective_bits": 3.251,
+      "compression_ratio": 2.365
+    },
+    {
+      "exp_id": "m1_awq_int4_gpc",
+      "path": "results/m1/m1_awq_int4_gpc.json",
+      "method": "awq",
+      "n_bits": 4,
+      "group_size": -1,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 23.5248,
+      "delta_ppl_vs_fp16": 9.2803,
+      "size_mb": 431.578,
+      "effective_bits": 4.028,
+      "compression_ratio": 2.183
+    },
+    {
+      "exp_id": "m1_awq_int4_g128",
+      "path": "results/m1/m1_awq_int4_g128.json",
+      "method": "awq",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 16.4258,
+      "delta_ppl_vs_fp16": 2.1813,
+      "size_mb": 441.082,
+      "effective_bits": 4.251,
+      "compression_ratio": 2.136
+    },
+    {
+      "exp_id": "m1_awq_int4_g256",
+      "path": "results/m1/m1_awq_int4_g256.json",
+      "method": "awq",
+      "n_bits": 4,
+      "group_size": 256,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 17.7446,
+      "delta_ppl_vs_fp16": 3.5001,
+      "size_mb": 436.289,
+      "effective_bits": 4.139,
+      "compression_ratio": 2.16
+    },
+    {
+      "exp_id": "m1_awq_int4_g64",
+      "path": "results/m1/m1_awq_int4_g64.json",
+      "method": "awq",
+      "n_bits": 4,
+      "group_size": 64,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 16.0458,
+      "delta_ppl_vs_fp16": 1.8013,
+      "size_mb": 451.746,
+      "effective_bits": 4.501,
+      "compression_ratio": 2.086
+    },
+    {
+      "exp_id": "m1_gptq_int3_g128",
+      "path": "results/m1/m1_gptq_int3_g128.json",
+      "method": "gptq",
+      "n_bits": 3,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 22.4794,
+      "delta_ppl_vs_fp16": 8.2349,
+      "size_mb": 398.426,
+      "effective_bits": 3.251,
+      "compression_ratio": 2.365
+    },
+    {
+      "exp_id": "m1_gptq_int4_gpc",
+      "path": "results/m1/m1_gptq_int4_gpc.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": -1,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 17.3287,
+      "delta_ppl_vs_fp16": 3.0842,
+      "size_mb": 431.578,
+      "effective_bits": 4.028,
+      "compression_ratio": 2.183
+    },
+    {
+      "exp_id": "m1_gptq_int4_embint4",
+      "path": "results/m1/m1_gptq_int4_embint4.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": true,
+      "embedding_bits": 4,
+      "ppl": 16.6881,
+      "delta_ppl_vs_fp16": 2.4436,
+      "size_mb": 250.397,
+      "effective_bits": 4.251,
+      "compression_ratio": 3.763
+    },
+    {
+      "exp_id": "m1_gptq_int4_embint8",
+      "path": "results/m1/m1_gptq_int4_embint8.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": true,
+      "embedding_bits": 8,
+      "ppl": 15.4275,
+      "delta_ppl_vs_fp16": 1.183,
+      "size_mb": 315.311,
+      "effective_bits": 5.353,
+      "compression_ratio": 2.988
+    },
+    {
+      "exp_id": "m1_gptq_int4_g128",
+      "path": "results/m1/m1_gptq_int4_g128.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 15.4347,
+      "delta_ppl_vs_fp16": 1.1902,
+      "size_mb": 441.082,
+      "effective_bits": 4.251,
+      "compression_ratio": 2.136
+    },
+    {
+      "exp_id": "m1_gptq_int4_g256",
+      "path": "results/m1/m1_gptq_int4_g256.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 256,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 15.753,
+      "delta_ppl_vs_fp16": 1.5085,
+      "size_mb": 436.289,
+      "effective_bits": 4.139,
+      "compression_ratio": 2.16
+    },
+    {
+      "exp_id": "m1_gptq_int4_g64",
+      "path": "results/m1/m1_gptq_int4_g64.json",
+      "method": "gptq",
+      "n_bits": 4,
+      "group_size": 64,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 15.1314,
+      "delta_ppl_vs_fp16": 0.8869,
+      "size_mb": 451.746,
+      "effective_bits": 4.501,
+      "compression_ratio": 2.086
+    },
+    {
+      "exp_id": "m1_rtn_int3_g128",
+      "path": "results/m1/m1_rtn_int3_g128.json",
+      "method": "rtn",
+      "n_bits": 3,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 65.6957,
+      "delta_ppl_vs_fp16": 51.4512,
+      "size_mb": 398.426,
+      "effective_bits": 3.251,
+      "compression_ratio": 2.365
+    },
+    {
+      "exp_id": "m1_rtn_int4_gpc",
+      "path": "results/m1/m1_rtn_int4_gpc.json",
+      "method": "rtn",
+      "n_bits": 4,
+      "group_size": -1,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 26.8857,
+      "delta_ppl_vs_fp16": 12.6412,
+      "size_mb": 431.578,
+      "effective_bits": 4.028,
+      "compression_ratio": 2.183
+    },
+    {
+      "exp_id": "m1_rtn_int4_g128",
+      "path": "results/m1/m1_rtn_int4_g128.json",
+      "method": "rtn",
+      "n_bits": 4,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 17.058,
+      "delta_ppl_vs_fp16": 2.8135,
+      "size_mb": 441.082,
+      "effective_bits": 4.251,
+      "compression_ratio": 2.136
+    },
+    {
+      "exp_id": "m1_rtn_int4_g256",
+      "path": "results/m1/m1_rtn_int4_g256.json",
+      "method": "rtn",
+      "n_bits": 4,
+      "group_size": 256,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 18.864,
+      "delta_ppl_vs_fp16": 4.6195,
+      "size_mb": 436.289,
+      "effective_bits": 4.139,
+      "compression_ratio": 2.16
+    },
+    {
+      "exp_id": "m1_rtn_int4_g64",
+      "path": "results/m1/m1_rtn_int4_g64.json",
+      "method": "rtn",
+      "n_bits": 4,
+      "group_size": 64,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 16.1287,
+      "delta_ppl_vs_fp16": 1.8842,
+      "size_mb": 451.746,
+      "effective_bits": 4.501,
+      "compression_ratio": 2.086
+    },
+    {
+      "exp_id": "m1_rtn_int8_g128",
+      "path": "results/m1/m1_rtn_int8_g128.json",
+      "method": "rtn",
+      "n_bits": 8,
+      "group_size": 128,
+      "quant_embedding": false,
+      "embedding_bits": null,
+      "ppl": 14.2326,
+      "delta_ppl_vs_fp16": -0.0119,
+      "size_mb": 611.707,
+      "effective_bits": 8.251,
+      "compression_ratio": 1.54
+    }
+  ],
+  "sparse": [
+    {
+      "exp_id": "m2_sparse_block_b128_l1",
+      "path": "results/m2/m2_sparse_block_b128_l1.json",
+      "benchmark_kind": null,
+      "sparse_config": {
+        "mode": "block_sparse",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 4.5187,
+      "max_delta_ppl": 5.5339,
+      "avg_prefill_speedup": 0.6558,
+      "avg_decode_speedup": 0.869,
+      "avg_memory_delta_mb": -170.0,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 3.2501,
+          "prefill_speedup": 0.919,
+          "decode_speedup": 0.898,
+          "memory_delta_mb": -8.0
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 4.2563,
+          "prefill_speedup": 0.735,
+          "decode_speedup": 0.901,
+          "memory_delta_mb": -32.0
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 5.0345,
+          "prefill_speedup": 0.58,
+          "decode_speedup": 0.901,
+          "memory_delta_mb": -128.0
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 5.5339,
+          "prefill_speedup": 0.389,
+          "decode_speedup": 0.776,
+          "memory_delta_mb": -512.0
+        }
+      ],
+      "quality_note": null
+    },
+    {
+      "exp_id": "m2_sparse_sliding_w1024",
+      "path": "results/m2/m2_sparse_sliding_w1024.json",
+      "benchmark_kind": null,
+      "sparse_config": {
+        "mode": "sliding_window",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 44.8707,
+      "max_delta_ppl": 47.3188,
+      "avg_prefill_speedup": 0.6595,
+      "avg_decode_speedup": 0.8705,
+      "avg_memory_delta_mb": -170.0,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 47.3188,
+          "prefill_speedup": 0.913,
+          "decode_speedup": 0.895,
+          "memory_delta_mb": -8.0
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 45.6657,
+          "prefill_speedup": 0.737,
+          "decode_speedup": 0.913,
+          "memory_delta_mb": -32.0
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 43.7838,
+          "prefill_speedup": 0.583,
+          "decode_speedup": 0.903,
+          "memory_delta_mb": -128.0
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 42.7144,
+          "prefill_speedup": 0.405,
+          "decode_speedup": 0.771,
+          "memory_delta_mb": -512.0
+        }
+      ],
+      "quality_note": null
+    },
+    {
+      "exp_id": "m2_sparse_streaming_s64_w1024",
+      "path": "results/m2/m2_sparse_streaming_s64_w1024.json",
+      "benchmark_kind": null,
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.841,
+      "max_delta_ppl": 1.3535,
+      "avg_prefill_speedup": 0.6595,
+      "avg_decode_speedup": 0.8705,
+      "avg_memory_delta_mb": -170.5,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.242,
+          "prefill_speedup": 0.921,
+          "decode_speedup": 0.902,
+          "memory_delta_mb": -8.0
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.707,
+          "prefill_speedup": 0.737,
+          "decode_speedup": 0.9,
+          "memory_delta_mb": -32.0
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 1.0614,
+          "prefill_speedup": 0.585,
+          "decode_speedup": 0.906,
+          "memory_delta_mb": -130.0
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 1.3535,
+          "prefill_speedup": 0.395,
+          "decode_speedup": 0.774,
+          "memory_delta_mb": -512.0
+        }
+      ],
+      "quality_note": null
+    },
+    {
+      "exp_id": "m2c_streaming_kvprune_s64_w1024",
+      "path": "results/m2/m2c_streaming_kvprune_s64_w1024.json",
+      "benchmark_kind": "streaming_kv_pruning",
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "cache_pruning": true,
+        "chunked_prefill": false,
+        "prefill_chunk_size": 512,
+        "ring_graph": false,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.841,
+      "max_delta_ppl": 1.3535,
+      "avg_prefill_speedup": 0.998,
+      "avg_decode_speedup": 0.9065,
+      "avg_memory_delta_mb": 157.1895,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.242,
+          "prefill_speedup": 0.999,
+          "decode_speedup": 0.904,
+          "memory_delta_mb": 23.999
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.707,
+          "prefill_speedup": 0.999,
+          "decode_speedup": 0.903,
+          "memory_delta_mb": 75.906
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 1.0614,
+          "prefill_speedup": 1.001,
+          "decode_speedup": 0.905,
+          "memory_delta_mb": 168.311
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 1.3535,
+          "prefill_speedup": 0.993,
+          "decode_speedup": 0.914,
+          "memory_delta_mb": 360.542
+        }
+      ],
+      "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;latency/memory 使用真实 KV cache 裁剪路径。"
+    },
+    {
+      "exp_id": "m2d_streaming_chunked_s64_w1024_c512",
+      "path": "results/m2/m2d_streaming_chunked_s64_w1024_c512.json",
+      "benchmark_kind": "streaming_chunked_prefill",
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "cache_pruning": false,
+        "chunked_prefill": true,
+        "prefill_chunk_size": 512,
+        "ring_graph": false,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.841,
+      "max_delta_ppl": 1.3535,
+      "avg_prefill_speedup": 0.198,
+      "avg_decode_speedup": 0.901,
+      "avg_memory_delta_mb": 2105.743,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.242,
+          "prefill_speedup": 0.249,
+          "decode_speedup": 0.899,
+          "memory_delta_mb": 330.911
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.707,
+          "prefill_speedup": 0.171,
+          "decode_speedup": 0.915,
+          "memory_delta_mb": 980.317
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 1.0614,
+          "prefill_speedup": 0.183,
+          "decode_speedup": 0.895,
+          "memory_delta_mb": 2265.722
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 1.3535,
+          "prefill_speedup": 0.189,
+          "decode_speedup": 0.895,
+          "memory_delta_mb": 4846.022
+        }
+      ],
+      "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;latency/memory 使用 chunked prefill + StreamingLLM KV cache 裁剪路径。"
+    },
+    {
+      "exp_id": "m2e_streaming_compile_probe",
+      "path": "results/m2/m2e_streaming_compile_probe.json",
+      "benchmark_kind": null,
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "cache_pruning": false,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.841,
+      "max_delta_ppl": 1.3535,
+      "avg_prefill_speedup": 0.6625,
+      "avg_decode_speedup": 0.8815,
+      "avg_memory_delta_mb": -170.0297,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.242,
+          "prefill_speedup": 0.925,
+          "decode_speedup": 0.907,
+          "memory_delta_mb": -8.0
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.707,
+          "prefill_speedup": 0.735,
+          "decode_speedup": 0.915,
+          "memory_delta_mb": -32.0
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 1.0614,
+          "prefill_speedup": 0.582,
+          "decode_speedup": 0.913,
+          "memory_delta_mb": -128.064
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 1.3535,
+          "prefill_speedup": 0.408,
+          "decode_speedup": 0.791,
+          "memory_delta_mb": -512.055
+        }
+      ],
+      "quality_note": null
+    },
+    {
+      "exp_id": "m2e_streaming_ringgraph_s64_w1024",
+      "path": "results/m2/m2e_streaming_ringgraph_s64_w1024.json",
+      "benchmark_kind": "streaming_ring_graph",
+      "sparse_config": {
+        "mode": "streaming_llm",
+        "window_size": 1024,
+        "sink_size": 64,
+        "block_size": 128,
+        "block_lookback": 1,
+        "cache_pruning": false,
+        "ring_graph": true,
+        "benchmark_lengths": [
+          2048,
+          4096,
+          8192,
+          16384
+        ]
+      },
+      "avg_delta_ppl": 0.841,
+      "max_delta_ppl": 1.3535,
+      "avg_prefill_speedup": 1.0,
+      "avg_decode_speedup": 5.331,
+      "avg_memory_delta_mb": 137.942,
+      "curve": [
+        {
+          "seqlen": 2048,
+          "delta_ppl": 0.242,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 5.341,
+          "memory_delta_mb": 18.482
+        },
+        {
+          "seqlen": 4096,
+          "delta_ppl": 0.707,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 5.323,
+          "memory_delta_mb": 61.248
+        },
+        {
+          "seqlen": 8192,
+          "delta_ppl": 1.0614,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 5.287,
+          "memory_delta_mb": 144.497
+        },
+        {
+          "seqlen": 16384,
+          "delta_ppl": 1.3535,
+          "prefill_speedup": 1.0,
+          "decode_speedup": 5.373,
+          "memory_delta_mb": 327.541
+        }
+      ],
+      "quality_note": "sparse.ppl 使用 StreamingLLM additive mask 的 teacher-forced PPL 作为质量参考;decode latency/memory 使用 ring-buffer KV cache + CUDA graph replay 路径;prefill 非 M2-e 优化对象,沿用 baseline 值。"
+    }
+  ],
+  "distill": [
+    {
+      "exp_id": "m3_distill_qwen0.5b",
+      "path": "results/m3_distill_qwen0.5b.json",
+      "teacher_ppl": 13.2698,
+      "student_init_ppl": 15.9786,
+      "student_final_ppl": 14.2716,
+      "gap_recovered": 0.6302,
+      "gap_recovered_pct": 63.02,
+      "size_mb": 441.082,
+      "effective_bits": 4.251,
+      "compression_ratio": 2.136,
+      "curve": [
+        {
+          "step": 0,
+          "ppl": 15.9786
+        },
+        {
+          "step": 20,
+          "ppl": 15.0685
+        },
+        {
+          "step": 40,
+          "ppl": 14.7596
+        },
+        {
+          "step": 60,
+          "ppl": 14.5166
+        },
+        {
+          "step": 80,
+          "ppl": 14.3035
+        },
+        {
+          "step": 100,
+          "ppl": 14.2716
+        }
+      ]
+    },
+    {
+      "exp_id": "m3_distill_qwen0.5b_smoke",
+      "path": "results/m3_distill_qwen0.5b_smoke.json",
+      "teacher_ppl": 13.3013,
+      "student_init_ppl": 33.4224,
+      "student_final_ppl": 33.4224,
+      "gap_recovered": 0.0,
+      "gap_recovered_pct": 0.0,
+      "size_mb": 441.082,
+      "effective_bits": 4.251,
+      "compression_ratio": 2.136,
+      "curve": [
+        {
+          "step": 0,
+          "ppl": 33.4224
+        },
+        {
+          "step": 5,
+          "ppl": 33.4224
+        },
+        {
+          "step": 10,
+          "ppl": 33.4224
+        }
+      ]
+    }
+  ],
+  "combinations": [
+    {
+      "name": "GPTQ INT4 + emb INT8 + ring-graph sparse",
+      "status": "derived",
+      "derived_from": [
+        "m1_gptq_int4_embint8",
+        "m2e_streaming_ringgraph_s64_w1024"
+      ],
+      "short_context_ppl": 15.4275,
+      "short_context_delta_ppl_vs_fp16": 1.183,
+      "size_mb": 315.311,
+      "compression_ratio": 2.988,
+      "avg_long_context_delta_ppl_reference": 0.841,
+      "avg_decode_speedup": 5.331,
+      "avg_memory_delta_mb": 137.942,
+      "note": "量化 PPL 与稀疏长上下文指标来自独立实验，未做端到端联合评测。"
+    },
+    {
+      "name": "GPTQ INT4 + emb INT4 + ring-graph sparse",
+      "status": "derived",
+      "derived_from": [
+        "m1_gptq_int4_embint4",
+        "m2e_streaming_ringgraph_s64_w1024"
+      ],
+      "short_context_ppl": 16.6881,
+      "short_context_delta_ppl_vs_fp16": 2.4436,
+      "size_mb": 250.397,
+      "compression_ratio": 3.763,
+      "avg_long_context_delta_ppl_reference": 0.841,
+      "avg_decode_speedup": 5.331,
+      "avg_memory_delta_mb": 137.942,
+      "note": "量化 PPL 与稀疏长上下文指标来自独立实验，未做端到端联合评测。"
+    },
+    {
+      "name": "M3 distilled RTN INT4 + ring-graph sparse",
+      "status": "derived",
+      "derived_from": [
+        "m3_distill_qwen0.5b",
+        "m2e_streaming_ringgraph_s64_w1024"
+      ],
+      "short_context_ppl": 14.2716,
+      "short_context_delta_ppl_vs_teacher": 1.0018,
+      "size_mb": 441.082,
+      "compression_ratio": 2.136,
+      "gap_recovered_pct": 63.02,
+      "avg_long_context_delta_ppl_reference": 0.841,
+      "avg_decode_speedup": 5.331,
+      "avg_memory_delta_mb": 137.942,
+      "note": "蒸馏结果与稀疏长上下文指标来自独立实验，未做端到端联合评测。"
+    }
+  ],
+  "missing": {
+    "qwen1.5b_results": true,
+    "joint_quant_sparse_distill_results": true
+  }
+}

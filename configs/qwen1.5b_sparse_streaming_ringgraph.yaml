@@ -1,0 +1,29 @@
+# M4 1.5B 关键复现:M2-e ring-buffer KV cache + CUDA graph decode
+# 用于验证 0.5B 长序列 decode 加速结论是否能迁移到 Qwen2.5-1.5B。
+exp_id: m2e_streaming_ringgraph_s64_w1024_1.5b
+seed: 42
+out_dir: results
+
+model:
+  name: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: float16
+  device: cuda
+
+sparse:
+  mode: streaming_llm
+  window_size: 1024
+  sink_size: 64
+  block_size: 128
+  block_lookback: 1
+  cache_pruning: false
+  ring_graph: true
+  benchmark_lengths: [2048, 4096, 8192, 16384]
+
+eval:
+  max_samples: null
+
+profile:
+  decode_tokens: 128
+  warmup: 2
+  repeats: 5
+  reset_peak_after_prefill: true

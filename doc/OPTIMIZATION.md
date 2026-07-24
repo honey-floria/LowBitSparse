@@ -505,4 +505,31 @@ chunked 统计:`chunk_size=512`、`cache_position_passed=true`、`kept_len=1088`
 
 **结论**:M3 验收完成。后续真正值得做的是消融:全参 vs 仅 scale vs LoRA,以及 α/β 权重扫描;但“蒸馏能否把 INT4 拉回来”这件事已经被实测回答。
 
+## [2026-07-24] M4 — 汇总报告生成与组合结论收口
+**背景 / 目标**:M4 要把 M0/M1/M2/M3 的结果汇总成统一机器可读表和最终报告,并给出量化、稀疏、蒸馏三类曲线与组合结论。
+
+**方案**:
+- 新增 `scripts/build_m4_report.py`,递归读取 `results/**/*.json`,不加载模型、不依赖 GPU。
+- 生成 `results/summary.json`:包含 baseline、全部量化行、全部稀疏 benchmark、蒸馏曲线和组合项。
+- 生成 `results/report.md`:包含压缩比 vs PPL、长序列稀疏加速、蒸馏 step vs PPL 三类表格曲线。
+- 组合项采用 `derived` 口径:把 M1/M3 的压缩与短上下文 PPL、M2-e 的长序列 decode 加速和质量参考放进同一张表,但明确标注不是端到端联合实跑。
+
+**结果**:
+- `python scripts/build_m4_report.py` 成功读取 28 个 JSON,写出 `results/summary.json` 与 `results/report.md`。
+- `python -m pytest -q` 通过,41 passed。
+- 关键组合行:
+
+| 组合 | 体积/压缩比 | 短上下文 PPL | 长上下文 ΔPPL 参考 | decode |
+| --- | --- | --- | --- | --- |
+| GPTQ INT4 + emb INT8 + M2-e | 315.3 MB / 2.988x | 15.4275 | +0.841 | 5.331x |
+| GPTQ INT4 + emb INT4 + M2-e | 250.4 MB / 3.763x | 16.6881 | +0.841 | 5.331x |
+| M3 distilled RTN INT4 + M2-e | 441.1 MB / 2.136x | 14.2716 | +0.841 | 5.331x |
+
+**边界 / 风险**:
+- 当前工作站是 CPU 环境(`torch 2.13.0+cpu`,CUDA 不可用),不能真实补跑 1.5B 或联合量化+稀疏+蒸馏模型。
+- 结果目录没有 `qwen1.5b` 相关 JSON,因此 TODO 中 1.5B 复现标为 `[!]` 而不是 `[x]`。
+- M2-e 的质量仍是 StreamingLLM additive mask teacher-forced PPL 参考;ring-buffer + CUDA graph 路径的 latency/memory 是真实 benchmark proof,生产级 generate 仍需 RoPE 相位忠实修正。
+
+**结论**:M4 的 0.5B 报告链路已收口。推荐默认点是 GPTQ INT4 + embedding INT8;若优先精度,选 M3 distilled RTN INT4;若优先长序列 decode,叠加 M2-e ring-buffer + CUDA graph。
+
 <!-- 后续条目在此追加,遵循上方模板 -->
